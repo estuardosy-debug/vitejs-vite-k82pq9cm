@@ -17,6 +17,7 @@ import {
   orderBy, 
   onSnapshot,
   deleteDoc,
+  updateDoc,
   doc
 } from 'firebase/firestore';
 import { 
@@ -33,7 +34,13 @@ import {
   RefreshCw,
   BookOpen,
   Plus,
-  Trash2
+  Trash2,
+  UserPlus,
+  Settings,
+  ShieldAlert,
+  Check,
+  X,
+  UserX
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN FIREBASE ---
@@ -52,13 +59,25 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 const appId = 'asistencia-clase-2026';
+const MASTER_KEY = "LULY2639"; // 🔑 CÓDIGO SECRETO (No visible en pantalla)
+
+// Validación para evitar pantalla negra si falta la config
+const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "TU_API_KEY_AQUI";
+
+let app, auth, db;
+if (isConfigured) {
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (e) {
+    console.error("Error inicializando Firebase:", e);
+  }
+}
 
 // --- COMPONENTES UI REUTILIZABLES ---
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, icon: Icon }) => {
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, icon: Icon, title = '' }) => {
   const baseStyle = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
   const variants = {
     primary: "bg-blue-600 text-white hover:bg-blue-700",
@@ -72,6 +91,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
       onClick={onClick} 
       className={`${baseStyle} ${variants[variant]} ${className}`}
       disabled={disabled}
+      title={title}
     >
       {Icon && <Icon size={18} />}
       {children}
@@ -86,7 +106,7 @@ const Input = ({ label, type = "text", value, onChange, placeholder, required = 
       type={type}
       value={value}
       onChange={onChange}
-      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white text-gray-900 placeholder-gray-400"
       placeholder={placeholder}
       required={required}
     />
@@ -100,7 +120,7 @@ const Select = ({ label, value, onChange, options, placeholder, required = false
       <select
         value={value}
         onChange={onChange}
-        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all appearance-none bg-white"
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all appearance-none bg-white text-gray-900"
         required={required}
       >
         <option value="" disabled>{placeholder}</option>
@@ -129,16 +149,37 @@ export default function App() {
   const [view, setView] = useState('landing'); 
   const [loading, setLoading] = useState(true);
   const [currentUserData, setCurrentUserData] = useState(null); 
+  const [adminUser, setAdminUser] = useState(null); 
+
+  // Verificar configuración antes de cargar
+  if (!isConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <Card className="max-w-md w-full p-8 text-center">
+          <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Settings size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Falta Configuración</h2>
+          <p className="text-gray-600 mb-6">
+            Para que la App funcione, necesitas pegar tus credenciales de Firebase en el archivo <code>App.jsx</code> (Líneas 40-48).
+          </p>
+          <div className="bg-gray-50 p-3 rounded text-left text-xs font-mono text-gray-500 border overflow-x-auto">
+            const firebaseConfig = &#123;<br/>
+            &nbsp;&nbsp;apiKey: "TU_API_KEY",<br/>
+            &nbsp;&nbsp;...<br/>
+            &#125;;
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   // Autenticación inicial
   useEffect(() => {
+    if (!auth) return;
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (error) {
         console.error("Auth error:", error);
       }
@@ -154,6 +195,7 @@ export default function App() {
 
   const handleLogout = () => {
     setCurrentUserData(null);
+    setAdminUser(null);
     setView('landing');
   };
 
@@ -177,9 +219,12 @@ export default function App() {
             </h1>
           </div>
           {view !== 'landing' && (
-            <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1 transition-colors">
-              <LogOut size={16} /> Salir
-            </button>
+            <div className="flex items-center gap-4">
+              {adminUser && <span className="text-sm font-medium hidden md:block text-gray-600">Hola, {adminUser.name}</span>}
+              <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1 transition-colors">
+                <LogOut size={16} /> Salir
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -187,7 +232,8 @@ export default function App() {
       <main className="max-w-5xl mx-auto p-4 md:p-6">
         {view === 'landing' && <LandingScreen setView={setView} />}
         
-        {view === 'admin-login' && <AdminLogin setView={setView} />}
+        {view === 'admin-login' && <AdminLogin setView={setView} setAdminUser={setAdminUser} appId={appId} />}
+        {view === 'admin-register' && <AdminRegister setView={setView} appId={appId} />}
         
         {view === 'student-login' && (
           <StudentLogin 
@@ -207,7 +253,7 @@ export default function App() {
           />
         )}
         
-        {view === 'admin-dash' && <AdminDashboard user={user} appId={appId} />}
+        {view === 'admin-dash' && <AdminDashboard user={user} adminUser={adminUser} appId={appId} />}
         
         {view === 'student-dash' && (
           <StudentDashboard 
@@ -259,17 +305,50 @@ const LandingScreen = ({ setView }) => (
   </div>
 );
 
-// 2. Admin Login
-const AdminLogin = ({ setView }) => {
-  const [pass, setPass] = useState('');
+// 2. Admin Login (ACTUALIZADO: Verificación de Estado)
+const AdminLogin = ({ setView, setAdminUser, appId }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (pass === 'admin123') {
-      setView('admin-dash');
-    } else {
-      setError('Contraseña incorrecta (Prueba: admin123)');
+    setLoading(true);
+    setError('');
+
+    try {
+      const adminsRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins');
+      const q = query(adminsRef, where("email", "==", email), where("password", "==", password));
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        const adminData = snapshot.docs[0].data();
+        
+        // 🛡️ VERIFICACIÓN DE ESTADO
+        if (adminData.status === 'pending') {
+          setError('Tu cuenta está pendiente de aprobación por un administrador.');
+          setLoading(false);
+          return;
+        }
+
+        if (adminData.status === 'rejected') {
+          setError('Tu solicitud de registro ha sido rechazada.');
+          setLoading(false);
+          return;
+        }
+
+        // Si es aprobado o superadmin, entra
+        setAdminUser({ ...adminData, id: snapshot.docs[0].id });
+        setView('admin-dash');
+      } else {
+        setError('Credenciales incorrectas. Verifica tu correo y contraseña.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Error al conectar. Intenta de nuevo.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -279,16 +358,37 @@ const AdminLogin = ({ setView }) => {
         <h2 className="text-2xl font-bold mb-6 text-center">Acceso Docente</h2>
         <form onSubmit={handleLogin}>
           <Input 
-            label="Contraseña de Administrador" 
-            type="password" 
-            value={pass} 
-            onChange={(e) => setPass(e.target.value)} 
-            placeholder="Introduce tu contraseña"
+            label="Correo Electrónico / Usuario" 
+            type="text" 
+            value={email} 
+            onChange={(e) => setEmail(e.target.value)} 
+            placeholder="correo@ejemplo.com"
+            required
           />
+          <Input 
+            label="Contraseña" 
+            type="password" 
+            value={password} 
+            onChange={(e) => setPassword(e.target.value)} 
+            placeholder="Tu contraseña personal"
+            required
+          />
+          
           {error && <p className="text-red-500 text-sm mb-4 flex items-center gap-1"><AlertCircle size={14}/> {error}</p>}
-          <Button className="w-full" type="submit">Iniciar Sesión</Button>
+          
+          <Button className="w-full" type="submit" disabled={loading}>
+            {loading ? 'Verificando...' : 'Iniciar Sesión'}
+          </Button>
+
+          <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-500 mb-3">¿Eres un nuevo docente?</p>
+            <Button variant="secondary" className="w-full" onClick={() => setView('admin-register')} icon={UserPlus}>
+              Solicitar Registro
+            </Button>
+          </div>
+          
           <div className="mt-4 text-center">
-            <button type="button" onClick={() => setView('landing')} className="text-sm text-gray-500 hover:underline">Cancelar</button>
+            <button type="button" onClick={() => setView('landing')} className="text-sm text-gray-500 hover:underline">Volver al Inicio</button>
           </div>
         </form>
       </Card>
@@ -296,66 +396,53 @@ const AdminLogin = ({ setView }) => {
   );
 };
 
-// 3. Student Login (ACTUALIZADO: CON SELECCIÓN DE CURSO)
-const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
-  const [carne, setCarne] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [courses, setCourses] = useState([]);
-  const [error, setError] = useState('');
+// 2.1 Admin Register (ACTUALIZADO: Código Maestro Oculto)
+const AdminRegister = ({ setView, appId }) => {
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', secretCode: '' });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  // Cargar cursos disponibles
-  useEffect(() => {
-    if (!user) return;
-    const coursesRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses');
-    const q = query(coursesRef, orderBy('name'));
-    
-    // Usamos onSnapshot para tener la lista en tiempo real
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const courseList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setCourses(courseList);
-    });
-    
-    return () => unsubscribe();
-  }, [user, appId]);
-
-  const handleLogin = async (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
-    if (!user) return;
-    
-    if (!selectedCourse) {
-      setError('Por favor selecciona el curso al que asistes.');
-      return;
-    }
-
     setLoading(true);
     setError('');
 
     try {
-      const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_users');
-      const q = query(usersRef, where("carne", "==", carne));
-      const querySnapshot = await getDocs(q);
+      // Verificar si ya existe
+      const adminsRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins');
+      const q = query(adminsRef, where("email", "==", formData.email));
+      const snapshot = await getDocs(q);
 
-      if (querySnapshot.empty) {
-        setError('Número de carné no encontrado. Por favor regístrate primero.');
-      } else {
-        const docData = querySnapshot.docs[0].data();
-        localStorage.setItem('qr_app_device_link', docData.carne);
-        
-        // Guardamos los datos del usuario MÁS el curso seleccionado para esta sesión
-        setCurrentUserData({
-          ...docData,
-          currentCourse: selectedCourse 
-        });
-        
-        setView('student-dash');
+      if (!snapshot.empty) {
+        setError('Este correo ya está registrado.');
+        setLoading(false);
+        return;
       }
+
+      // Determinar rol y estado basado en código secreto
+      const isSuperAdmin = formData.secretCode === MASTER_KEY;
+      const role = isSuperAdmin ? 'superadmin' : 'docente';
+      const status = isSuperAdmin ? 'approved' : 'pending';
+
+      await addDoc(adminsRef, {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password, // Nota: En prod usar hashing
+        role: role,
+        status: status,
+        createdAt: serverTimestamp()
+      });
+
+      if (isSuperAdmin) {
+        alert("¡Cuenta de SUPER ADMINISTRADOR creada! Puedes ingresar inmediatamente.");
+      } else {
+        alert("Solicitud enviada. Un administrador deberá aprobar tu cuenta antes de que puedas ingresar.");
+      }
+      setView('admin-login');
+
     } catch (err) {
       console.error(err);
-      setError('Error de conexión. Inténtalo de nuevo.');
+      setError('Error al crear la cuenta.');
     } finally {
       setLoading(false);
     }
@@ -364,45 +451,53 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
   return (
     <div className="max-w-md mx-auto py-10">
       <Card className="p-8">
-        <h2 className="text-2xl font-bold mb-2 text-center">Bienvenido Estudiante</h2>
-        <p className="text-center text-gray-500 mb-6 text-sm">Selecciona tu curso e ingresa tu ID</p>
-        
-        <form onSubmit={handleLogin}>
-          <Select 
-            label="Seleccionar Curso"
-            value={selectedCourse}
-            onChange={(e) => setSelectedCourse(e.target.value)}
-            options={courses}
-            placeholder="-- Elige un curso --"
+        <h2 className="text-2xl font-bold mb-6 text-center">Solicitud de Registro</h2>
+        <form onSubmit={handleRegister}>
+          <Input 
+            label="Nombre Completo" 
+            value={formData.name} 
+            onChange={(e) => setFormData({...formData, name: e.target.value})} 
+            placeholder="Prof. Juan Pérez"
             required
           />
-
           <Input 
-            label="Número de Carné / ID" 
-            value={carne} 
-            onChange={(e) => setCarne(e.target.value)} 
-            placeholder="Ej. 2024-001"
+            label="Correo Electrónico" 
+            type="email"
+            value={formData.email} 
+            onChange={(e) => setFormData({...formData, email: e.target.value})} 
+            placeholder="juan@escuela.edu"
+            required
+          />
+          <Input 
+            label="Contraseña Personal" 
+            type="password"
+            value={formData.password} 
+            onChange={(e) => setFormData({...formData, password: e.target.value})} 
+            placeholder="Crea una contraseña segura"
             required
           />
           
-          {courses.length === 0 && (
-            <div className="mb-4 text-sm text-yellow-600 bg-yellow-50 p-3 rounded">
-              <AlertCircle size={16} className="inline mr-1" />
-              No hay cursos activos. Pide a tu docente que registre uno.
-            </div>
-          )}
+          <div className="pt-2 border-t mt-4 mb-4">
+             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
+               Código de Invitación (Opcional)
+             </label>
+             <input
+               type="text"
+               value={formData.secretCode}
+               onChange={(e) => setFormData({...formData, secretCode: e.target.value})}
+               className="w-full px-4 py-2 border border-gray-200 rounded bg-gray-50 text-sm focus:bg-white focus:border-blue-500 outline-none transition-colors"
+               placeholder="Solo para Administradores"
+             />
+             <p className="text-xs text-gray-400 mt-1">Si tienes el código maestro, ingresalo aquí para obtener acceso inmediato.</p>
+          </div>
 
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
           
-          <Button className="w-full mb-3" type="submit" disabled={loading || courses.length === 0}>
-            {loading ? 'Verificando...' : 'Ingresar'}
+          <Button className="w-full" type="submit" disabled={loading}>
+            {loading ? 'Procesando...' : 'Enviar Solicitud'}
           </Button>
-          
-          <div className="text-center pt-2 border-t border-gray-100">
-            <p className="text-sm text-gray-600 mb-2">¿Es tu primera vez aquí?</p>
-            <Button variant="secondary" className="w-full" onClick={() => setView('student-register')}>
-              Crear Cuenta Nueva
-            </Button>
+          <div className="mt-4 text-center">
+            <button type="button" onClick={() => setView('admin-login')} className="text-sm text-gray-500 hover:underline">Ya tengo cuenta</button>
           </div>
         </form>
       </Card>
@@ -410,7 +505,68 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
   );
 };
 
-// 4. Student Register
+// 3. Student Login (Sin Cambios)
+const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
+  const [carne, setCarne] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [courses, setCourses] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const coursesRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses');
+    const q = query(coursesRef, orderBy('name'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const courseList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setCourses(courseList);
+    });
+    return () => unsubscribe();
+  }, [user, appId]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!selectedCourse) { setError('Por favor selecciona el curso.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_users');
+      const q = query(usersRef, where("carne", "==", carne));
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        setError('Número de carné no encontrado.');
+      } else {
+        const docData = querySnapshot.docs[0].data();
+        localStorage.setItem('qr_app_device_link', docData.carne);
+        setCurrentUserData({ ...docData, currentCourse: selectedCourse });
+        setView('student-dash');
+      }
+    } catch (err) { console.error(err); setError('Error de conexión.'); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="max-w-md mx-auto py-10">
+      <Card className="p-8">
+        <h2 className="text-2xl font-bold mb-2 text-center">Bienvenido Estudiante</h2>
+        <p className="text-center text-gray-500 mb-6 text-sm">Selecciona tu curso e ingresa tu ID</p>
+        <form onSubmit={handleLogin}>
+          <Select label="Seleccionar Curso" value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} options={courses} placeholder="-- Elige un curso --" required />
+          <Input label="Número de Carné / ID" value={carne} onChange={(e) => setCarne(e.target.value)} placeholder="Ej. 2024-001" required />
+          {courses.length === 0 && <div className="mb-4 text-sm text-yellow-600 bg-yellow-50 p-3 rounded">No hay cursos activos.</div>}
+          {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+          <Button className="w-full mb-3" type="submit" disabled={loading || courses.length === 0}>{loading ? 'Ingresando...' : 'Ingresar'}</Button>
+          <div className="text-center pt-2 border-t border-gray-100">
+            <p className="text-sm text-gray-600 mb-2">¿Primera vez?</p>
+            <Button variant="secondary" className="w-full" onClick={() => setView('student-register')}>Crear Cuenta Nueva</Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+};
+
+// 4. Student Register (Sin Cambios)
 const StudentRegister = ({ setView, setCurrentUserData, user, appId }) => {
   const [formData, setFormData] = useState({ name: '', carne: '', email: '' });
   const [loading, setLoading] = useState(false);
@@ -421,35 +577,16 @@ const StudentRegister = ({ setView, setCurrentUserData, user, appId }) => {
     if (!user) return;
     setLoading(true);
     setError('');
-
     try {
       const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_users');
       const q = query(usersRef, where("carne", "==", formData.carne));
       const snapshot = await getDocs(q);
-
-      if (!snapshot.empty) {
-        setError('Este carné ya está registrado. Por favor inicia sesión.');
-        setLoading(false);
-        return;
-      }
-
-      const newUser = {
-        ...formData,
-        createdAt: serverTimestamp(),
-        deviceId: user.uid 
-      };
-
+      if (!snapshot.empty) { setError('Este carné ya está registrado.'); setLoading(false); return; }
+      const newUser = { ...formData, createdAt: serverTimestamp(), deviceId: user.uid };
       await addDoc(usersRef, newUser);
-      // Nota: Al registrarse no entramos directamente al dashboard porque necesitamos que seleccione curso en login
-      alert("Registro exitoso. Ahora por favor inicia sesión seleccionando tu curso.");
+      alert("Registro exitoso.");
       setView('student-login');
-
-    } catch (err) {
-      console.error(err);
-      setError('Error al registrar. Intenta de nuevo.');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); setError('Error al registrar.'); } finally { setLoading(false); }
   };
 
   return (
@@ -457,53 +594,27 @@ const StudentRegister = ({ setView, setCurrentUserData, user, appId }) => {
       <Card className="p-8">
         <h2 className="text-2xl font-bold mb-6 text-center">Registro de Estudiante</h2>
         <form onSubmit={handleRegister}>
-          <Input 
-            label="Nombre Completo" 
-            value={formData.name} 
-            onChange={(e) => setFormData({...formData, name: e.target.value})} 
-            required
-          />
-          <Input 
-            label="Número de Carné / ID" 
-            value={formData.carne} 
-            onChange={(e) => setFormData({...formData, carne: e.target.value})} 
-            required
-          />
-          <Input 
-            label="Correo Electrónico" 
-            type="email"
-            value={formData.email} 
-            onChange={(e) => setFormData({...formData, email: e.target.value})} 
-            required
-          />
-          
-          <div className="bg-blue-50 p-3 rounded text-xs text-blue-700 mb-4 flex gap-2">
-            <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <p>Al registrarte, esta cuenta quedará vinculada a este dispositivo para futuros registros.</p>
-          </div>
-
+          <Input label="Nombre Completo" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} required />
+          <Input label="Número de Carné / ID" value={formData.carne} onChange={(e) => setFormData({...formData, carne: e.target.value})} required />
+          <Input label="Correo Electrónico" type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required />
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-          
-          <Button className="w-full" type="submit" disabled={loading}>
-            {loading ? 'Registrando...' : 'Completar Registro'}
-          </Button>
-          <div className="mt-4 text-center">
-            <button type="button" onClick={() => setView('student-login')} className="text-sm text-gray-500 hover:underline">Ya tengo cuenta</button>
-          </div>
+          <Button className="w-full" type="submit" disabled={loading}>{loading ? 'Registrando...' : 'Completar Registro'}</Button>
+          <div className="mt-4 text-center"><button type="button" onClick={() => setView('student-login')} className="text-sm text-gray-500 hover:underline">Ya tengo cuenta</button></div>
         </form>
       </Card>
     </div>
   );
 };
 
-// 5. Admin Dashboard (ACTUALIZADO: GESTIÓN DE CURSOS)
-const AdminDashboard = ({ user, appId }) => {
+// 5. Admin Dashboard (ACTUALIZADO: Baja de Docentes)
+const AdminDashboard = ({ user, adminUser, appId }) => {
   const [sessionCode, setSessionCode] = useState(null);
   const [records, setRecords] = useState([]);
   const [courses, setCourses] = useState([]);
   const [newCourseName, setNewCourseName] = useState('');
+  const [pendingTeachers, setPendingTeachers] = useState([]);
+  const [approvedTeachers, setApprovedTeachers] = useState([]); // Nuevo estado para docentes activos
   
-  // Escuchar registros
   useEffect(() => {
     if (!user) return;
     const attendanceRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance');
@@ -519,7 +630,6 @@ const AdminDashboard = ({ user, appId }) => {
     return () => unsubscribe();
   }, [user, appId]);
 
-  // Escuchar cursos
   useEffect(() => {
     if (!user) return;
     const coursesRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses');
@@ -530,19 +640,70 @@ const AdminDashboard = ({ user, appId }) => {
     return () => unsubscribe();
   }, [user, appId]);
 
+  // Escuchar Pendientes (Super Admin)
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const adminsRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins');
+    const q = query(adminsRef, where("status", "==", "pending"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pending = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setPendingTeachers(pending);
+    });
+    return () => unsubscribe();
+  }, [user, adminUser, appId]);
+
+  // 👑 Escuchar Docentes Activos (Nuevo para Super Admin)
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const adminsRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins');
+    // Traemos todos los aprobados
+    const q = query(adminsRef, where("status", "==", "approved"));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Filtramos para no mostrarnos a nosotros mismos en la lista
+      const approved = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(doc => doc.id !== adminUser.id);
+      setApprovedTeachers(approved);
+    });
+    return () => unsubscribe();
+  }, [user, adminUser, appId]);
+
   const handleAddCourse = async (e) => {
     e.preventDefault();
     if (!newCourseName.trim()) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), {
       name: newCourseName.trim(),
+      createdBy: adminUser?.email || 'unknown',
       createdAt: serverTimestamp()
     });
     setNewCourseName('');
   };
 
   const handleDeleteCourse = async (id) => {
-    if(confirm('¿Estás seguro de eliminar este curso?')) {
+    if(confirm('¿Eliminar curso?')) {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_courses', id));
+    }
+  };
+
+  const handleApproveTeacher = async (id, name) => {
+    if(confirm(`¿Autorizar acceso al docente ${name}?`)) {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id), {
+        status: 'approved'
+      });
+    }
+  };
+
+  const handleRejectTeacher = async (id) => {
+    if(confirm('¿Rechazar y eliminar esta solicitud?')) {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id));
+    }
+  };
+
+  // 👑 Manejo de Baja de Docente Activo
+  const handleDeleteActiveTeacher = async (id, name) => {
+    if(confirm(`⚠️ ¿ATENCIÓN: Estás seguro de dar de baja a ${name}? \n\nEl docente perderá el acceso inmediatamente.`)) {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id));
     }
   };
 
@@ -556,22 +717,14 @@ const AdminDashboard = ({ user, appId }) => {
     const csvContent = [
       headers.join(","),
       ...records.map(r => [
-        `"${r.dateStr}"`,
-        `"${r.courseName || 'N/A'}"`, // Agregamos el curso al CSV
-        `"${r.studentName}"`,
-        `"${r.studentCarne}"`,
-        `"${r.studentEmail}"`,
-        r.location?.lat || 0,
-        r.location?.lng || 0,
-        r.sessionCode
+        `"${r.dateStr}"`, `"${r.courseName || 'N/A'}"`, `"${r.studentName}"`, `"${r.studentCarne}"`, `"${r.studentEmail}"`, r.location?.lat || 0, r.location?.lng || 0, r.sessionCode
       ].join(","))
     ].join("\n");
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "asistencia_completa.csv");
+    link.setAttribute("download", "asistencia.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -579,9 +732,89 @@ const AdminDashboard = ({ user, appId }) => {
 
   return (
     <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-bold text-blue-800">Panel de Control Docente</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-blue-600">Sesión: <strong>{adminUser?.name}</strong></span>
+            {adminUser?.role === 'superadmin' && (
+              <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-bold border border-indigo-200">SUPER ADMIN</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sección de Notificaciones y Gestión de Usuarios (Solo Super Admin) */}
+      {adminUser?.role === 'superadmin' && (
+        <div className="space-y-4">
+          
+          {/* Solicitudes Pendientes */}
+          {pendingTeachers.length > 0 && (
+            <Card className="p-6 border-l-4 border-l-orange-500 bg-orange-50">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-800">
+                <ShieldAlert size={20} /> Solicitudes de Registro Pendientes
+              </h3>
+              <div className="space-y-3">
+                {pendingTeachers.map(teacher => (
+                  <div key={teacher.id} className="flex flex-col md:flex-row justify-between items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="mb-2 md:mb-0">
+                      <p className="font-bold text-gray-800">{teacher.name}</p>
+                      <p className="text-sm text-gray-500">{teacher.email}</p>
+                      <p className="text-xs text-orange-600 font-medium">Esperando aprobación</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handleApproveTeacher(teacher.id, teacher.name)}
+                        className="flex items-center gap-1 bg-green-100 text-green-700 px-3 py-1.5 rounded hover:bg-green-200 font-medium text-sm transition-colors"
+                      >
+                        <Check size={16} /> Aprobar
+                      </button>
+                      <button 
+                        onClick={() => handleRejectTeacher(teacher.id)}
+                        className="flex items-center gap-1 bg-red-100 text-red-700 px-3 py-1.5 rounded hover:bg-red-200 font-medium text-sm transition-colors"
+                      >
+                        <X size={16} /> Rechazar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Directorio de Docentes Activos (NUEVO) */}
+          <Card className="p-6">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-gray-800">
+              <Users size={20} className="text-indigo-600" /> Directorio de Docentes Activos
+            </h3>
+            {approvedTeachers.length === 0 ? (
+              <p className="text-sm text-gray-500 italic">No hay otros docentes registrados aún.</p>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {approvedTeachers.map(teacher => (
+                  <div key={teacher.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50 group">
+                    <div>
+                      <p className="font-medium text-gray-900">{teacher.name}</p>
+                      <p className="text-xs text-gray-500">{teacher.email}</p>
+                      {teacher.role === 'superadmin' && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 rounded">ADMIN</span>}
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteActiveTeacher(teacher.id, teacher.name)}
+                      className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-2 rounded transition-all opacity-0 group-hover:opacity-100"
+                      title="Dar de baja / Eliminar acceso"
+                    >
+                      <UserX size={18} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
       <div className="grid md:grid-cols-3 gap-6">
         
-        {/* Panel 1: Gestión de Cursos (NUEVO) */}
         <Card className="md:col-span-1 p-6 flex flex-col h-[400px]">
           <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
             <BookOpen size={20} className="text-indigo-600" /> Cursos Disponibles
@@ -593,7 +826,7 @@ const AdminDashboard = ({ user, appId }) => {
               value={newCourseName}
               onChange={(e) => setNewCourseName(e.target.value)}
               placeholder="Nuevo curso..."
-              className="flex-1 px-3 py-2 border rounded-lg text-sm"
+              className="flex-1 px-3 py-2 border rounded-lg text-sm bg-white text-gray-900"
             />
             <button type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700">
               <Plus size={18} />
@@ -606,7 +839,7 @@ const AdminDashboard = ({ user, appId }) => {
             ) : (
               courses.map(c => (
                 <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg group">
-                  <span className="font-medium text-sm">{c.name}</span>
+                  <span className="font-medium text-sm text-gray-700">{c.name}</span>
                   <button onClick={() => handleDeleteCourse(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Trash2 size={14} />
                   </button>
@@ -616,7 +849,6 @@ const AdminDashboard = ({ user, appId }) => {
           </div>
         </Card>
 
-        {/* Panel 2: Control de Sesión */}
         <Card className="md:col-span-1 p-6 flex flex-col items-center text-center">
           <h3 className="text-lg font-bold mb-4">Código QR de Sesión</h3>
           
@@ -646,7 +878,6 @@ const AdminDashboard = ({ user, appId }) => {
           )}
         </Card>
 
-        {/* Panel 3: Tabla de Registros */}
         <Card className="md:col-span-3 p-6 overflow-hidden flex flex-col h-[500px]">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold flex items-center gap-2">
@@ -675,7 +906,7 @@ const AdminDashboard = ({ user, appId }) => {
                       <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-500">{record.dateStr}</td>
                       <td className="px-4 py-3 font-medium text-blue-700">{record.courseName}</td>
                       <td className="px-4 py-3 font-medium text-gray-900">{record.studentName}</td>
-                      <td className="px-4 py-3">{record.studentCarne}</td>
+                      <td className="px-4 py-3 text-gray-700">{record.studentCarne}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">
                         {record.location ? (
                           <span className="flex items-center gap-1" title={`${record.location.lat}, ${record.location.lng}`}>
@@ -701,7 +932,7 @@ const AdminDashboard = ({ user, appId }) => {
   );
 };
 
-// 6. Student Dashboard (ACTUALIZADO: ENVÍA EL CURSO)
+// 6. Student Dashboard (SIN CAMBIOS)
 const StudentDashboard = ({ userData, user, appId }) => {
   const [scanning, setScanning] = useState(false);
   const [location, setLocation] = useState(null);
@@ -765,7 +996,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
       
       await addDoc(attendanceRef, {
         sessionCode: code,
-        courseName: userData.currentCourse, // ¡AQUÍ GUARDAMOS EL CURSO SELECCIONADO!
+        courseName: userData.currentCourse, 
         studentId: user.uid,
         studentName: userData.name,
         studentCarne: userData.carne,
