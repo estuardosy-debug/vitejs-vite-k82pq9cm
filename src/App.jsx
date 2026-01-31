@@ -43,12 +43,10 @@ import {
   UserX
 } from 'lucide-react';
 
-// --- CONFIGURACIÓN FIREBASE ---
-// Import the functions you need from the SDKs you need
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+// NOTA: Hemos eliminado la importación estática para cargarla dinámicamente desde un CDN
+// y evitar errores de compilación si no se ha ejecutado npm install.
 
-// Your web app's Firebase configuration
+// --- CONFIGURACIÓN FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyAv2qf4LX-1ZWogHmlh2K8mPsz6jZzd0G8",
   authDomain: "asistenciaqr-pro.firebaseapp.com",
@@ -58,7 +56,6 @@ const firebaseConfig = {
   appId: "1:807077573027:web:d469bf687224298a4aaa16"
 };
 
-// Initialize Firebase
 const appId = 'asistencia-clase-2026';
 const MASTER_KEY = "LULY2639"; 
 
@@ -513,16 +510,29 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
   );
 };
 
-// --- ESCANER MANUAL (Sin Librerías) ---
+// --- ESCANER REAL (jsQR) ---
 const StudentDashboard = ({ userData, user, appId }) => {
   const [scanning, setScanning] = useState(false);
   const [location, setLocation] = useState(null);
   const [status, setStatus] = useState('idle');
   const [msg, setMsg] = useState('');
+  
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+
+  // Carga dinámica de la librería jsQR
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+    script.async = true;
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   const startScan = async () => {
-    setScanning(true);
     setStatus('locating');
     setMsg('Obteniendo tu ubicación GPS...');
 
@@ -540,7 +550,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
         });
         setStatus('scanning');
         setMsg('Apunta tu cámara al código QR del docente.');
-        initCamera();
+        setScanning(true);
       },
       (err) => {
         console.error(err);
@@ -551,24 +561,80 @@ const StudentDashboard = ({ userData, user, appId }) => {
     );
   };
 
-  const initCamera = async () => {
+  // Iniciar cámara y loop de escaneo cuando scanning es true
+  useEffect(() => {
+    if (scanning) {
+      startVideo();
+    } else {
+      stopVideo();
+    }
+    return () => stopVideo();
+  }, [scanning]);
+
+  const startVideo = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Importante: playsInline para iOS
+        videoRef.current.setAttribute("playsinline", true); 
         videoRef.current.play();
+        animationRef.current = requestAnimationFrame(tick);
       }
     } catch (err) {
-      console.warn("Camera access denied or unavailable", err);
+      console.warn("Camera access denied", err);
       setMsg("No pudimos acceder a la cámara. Usa el modo manual.");
     }
   };
 
-  const processAttendance = async (code) => {
+  const stopVideo = () => {
     if (videoRef.current && videoRef.current.srcObject) {
       videoRef.current.srcObject.getTracks().forEach(track => track.stop());
     }
-    
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+  };
+
+  const tick = () => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      
+      if (!canvas) return;
+
+      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth;
+      
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      // Intentar leer el código QR usando jsQR (desde window porque se carga por CDN)
+      // Verificamos si window.jsQR existe antes de usarlo
+      const jsQR = window.jsQR;
+      
+      if (jsQR) {
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
+
+        if (code) {
+          // ¡QR Encontrado!
+          const audio = new Audio('https://raw.githubusercontent.com/maykbrito/libs/main/scanner.mp3'); 
+          audio.play().catch(e => {}); 
+
+          processAttendance(code.data);
+          return; // Detener loop
+        }
+      }
+    }
+    animationRef.current = requestAnimationFrame(tick);
+  };
+
+  const processAttendance = async (codeStr) => {
+    setScanning(false);
     setStatus('saving');
     setMsg('Registrando asistencia...');
 
@@ -576,7 +642,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
       const attendanceRef = collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance');
       
       await addDoc(attendanceRef, {
-        sessionCode: code,
+        sessionCode: codeStr,
         courseName: userData.currentCourse, 
         studentId: user.uid,
         studentName: userData.name,
@@ -588,7 +654,6 @@ const StudentDashboard = ({ userData, user, appId }) => {
 
       setStatus('success');
       setMsg(`¡Asistencia registrada para ${userData.currentCourse}!`);
-      setScanning(false);
 
     } catch (err) {
       console.error(err);
@@ -641,7 +706,10 @@ const StudentDashboard = ({ userData, user, appId }) => {
           {scanning && (
             <div className="flex flex-col items-center">
               <div className="relative w-full aspect-square bg-black rounded-lg overflow-hidden mb-4 flex items-center justify-center">
-                <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-80" muted playsInline />
+                {/* Elementos ocultos pero necesarios para el proceso */}
+                <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted playsInline />
+                <canvas ref={canvasRef} className="hidden" />
+                
                 <div className="absolute inset-0 border-2 border-blue-500/50 z-10 animate-pulse"></div>
                 <div className="absolute z-20 text-white bg-black/50 px-4 py-2 rounded-full text-sm font-medium backdrop-blur-sm">
                   {msg}
