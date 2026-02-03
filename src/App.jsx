@@ -87,7 +87,15 @@ const Select = ({ label, value, onChange, options, placeholder, required = false
   </div>
 );
 
-const Card = ({ children, className = "" }) => <div className={`bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden ${className}`}>{children}</div>;
+// CORRECCIÓN AQUÍ: Se agregó {...props} para permitir el onClick en la tarjeta
+const Card = ({ children, className = "", ...props }) => (
+  <div 
+    className={`bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden ${className}`}
+    {...props} 
+  >
+    {children}
+  </div>
+);
 
 // --- APP PRINCIPAL ---
 export default function App() {
@@ -192,10 +200,7 @@ const LandingScreen = ({ setView }) => (
   </div>
 );
 
-// ... (AdminLogin, AdminRegister, StudentLogin, StudentRegister se mantienen IGUAL que la versión anterior segura)
-// Para ahorrar espacio en esta respuesta, asumo que copias los Login/Register de la versión anterior.
-// AÑADIR AQUÍ LOS COMPONENTES DE LOGIN/REGISTRO SI ES NECESARIO, SON LOS MISMOS.
-// Usaré versiones simplificadas aquí para centrarme en el DASHBOARD nuevo.
+// ... (Login/Register con correcciones menores en estilos para evitar overflow)
 
 const AdminLogin = ({ setView, setAdminUser, appId }) => {
   const [email, setEmail] = useState('');
@@ -378,7 +383,6 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
       where("createdBy", "==", adminUser.email), // 🔒 AISLAMIENTO
       orderBy('name')
     );
-    // Nota: Firestore requiere índice compuesto para where + orderBy. Si falla, quitar orderBy en primera instancia.
     // Fallback simple:
     const qSimple = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), where("createdBy", "==", adminUser.email));
     
@@ -387,9 +391,7 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
     });
   }, [user, adminUser, appId]);
 
-  // Cargar ASISTENCIA (Filtrada por mis cursos en memoria o por query si estructura lo permite)
-  // Estrategia: Traer toda la asistencia y filtrar en cliente por los cursos que SON MÍOS.
-  // Es seguro porque el ID de curso podría usarse, pero usaremos nombre por consistencia actual.
+  // Cargar ASISTENCIA (Filtrada por mis cursos en memoria)
   useEffect(() => {
     if (!user || courses.length === 0) return;
     const myCourseNames = courses.map(c => c.name);
