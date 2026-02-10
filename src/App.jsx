@@ -1,859 +1,747 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Users, Calendar, FileText, CheckCircle, LogOut, 
-  Settings, Search, Bell, Menu, X, 
-  Copy, Download, Shield, Gavel, LayoutDashboard 
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, 
-  signOut, onAuthStateChanged, updateProfile 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, addDoc, query, onSnapshot, 
-  orderBy, doc, updateDoc, setDoc, getDoc, serverTimestamp, deleteDoc, where 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  getDocs, 
+  serverTimestamp, 
+  orderBy, 
+  onSnapshot,
+  deleteDoc,
+  updateDoc,
+  doc
 } from 'firebase/firestore';
+import { 
+  QrCode, User, LogOut, FileSpreadsheet, Users, CheckCircle, 
+  AlertCircle, Lock, RefreshCw, BookOpen, Plus, Trash2, 
+  UserPlus, Settings, ShieldAlert, Check, X, UserX, 
+  BarChart3, Share2, PieChart as PieChartIcon, ExternalLink, Calendar,
+  Eraser, AlertTriangle
+} from 'lucide-react';
 
-// --- CONFIGURACIÓN DE FIREBASE ---
-// INSTRUCCIONES: Reemplaza los textos dentro de las comillas con tus datos reales.
-// Puedes encontrarlos en: Console Firebase -> Configuración del Proyecto -> General -> Tus apps
+// Librería de gráficos
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell
+} from 'recharts';
+
+// --- CONFIGURACIÓN FIREBASE ---
+// ⚠️ REEMPLAZA CON TUS CREDENCIALES
 const firebaseConfig = {
-  apiKey: "PEGA_TU_API_KEY_AQUI",
-  authDomain: "PEGA_TU_PROJECT_ID.firebaseapp.com",
-  projectId: "PEGA_TU_PROJECT_ID",
-  storageBucket: "PEGA_TU_PROJECT_ID.appspot.com",
-  messagingSenderId: "PEGA_TU_MESSAGING_SENDER_ID",
-  appId: "PEGA_TU_APP_ID"
+  apiKey: "AIzaSyAv2qf4LX-1ZWogHmlh2K8mPsz6jZzd0G8",
+  authDomain: "asistenciaqr-pro.firebaseapp.com",
+  projectId: "asistenciaqr-pro",
+  storageBucket: "asistenciaqr-pro.firebasestorage.app",
+  messagingSenderId: "807077573027",
+  appId: "1:807077573027:web:d469bf687224298a4aaa16"
 };
 
-// Inicialización segura
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-// Usamos un ID fijo para producción si no hay variable de entorno
-const appId = 'juzgado-app';
+const appId = 'asistencia-clase-2026';
+const MASTER_KEY = "LULY2639"; 
 
-// --- UTILIDADES ---
-const formatDateTime = (date) => {
-  if (!date) return '';
-  return new Date(date.seconds * 1000).toLocaleString('es-GT', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  });
+const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "TU_API_KEY_AQUI";
+
+let app, auth, db;
+if (isConfigured) {
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } catch (e) { console.error("Error Firebase:", e); }
+}
+
+// --- COMPONENTES UI ---
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, icon: Icon, title = '' }) => {
+  const base = "px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
+  const vars = {
+    primary: "bg-blue-600 text-white hover:bg-blue-700",
+    secondary: "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50",
+    danger: "bg-red-50 text-red-600 hover:bg-red-100",
+    success: "bg-green-600 text-white hover:bg-green-700",
+    outline: "border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+  };
+  return <button onClick={onClick} className={`${base} ${vars[variant]} ${className}`} disabled={disabled} title={title}>{Icon && <Icon size={18} />}{children}</button>;
 };
 
-const padToFive = (num) => {
-  if (!num) return '';
-  return num.toString().padStart(5, '0');
-};
+// CORRECCIÓN VISUAL: Forzamos bg-white y text-black para evitar campos oscuros en móviles
+const Input = ({ label, type = "text", value, onChange, placeholder, required = false }) => (
+  <div className="mb-4">
+    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+    <input 
+      type={type} 
+      value={value} 
+      onChange={onChange} 
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white text-black placeholder-gray-500"
+      placeholder={placeholder} 
+      required={required} 
+      style={{ backgroundColor: '#ffffff', color: '#000000' }} // Estilo en línea para máxima prioridad
+    />
+  </div>
+);
 
-const exportToCSV = (data, filename) => {
-  if (!data.length) return;
-  
-  const headers = [
-    "ID Registro", "Fecha y Hora", "Nombres Completos", "Teléfono", "Email", 
-    "Causa (Juzgado-Año-Proceso)", "Sujeto Procesal", "Fiscalía", "Casillero Electrónico"
-  ];
+// CORRECCIÓN VISUAL: Igual que el input, forzamos estilos
+const Select = ({ label, value, onChange, options, placeholder, required = false }) => (
+  <div className="mb-4">
+    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+    <select 
+      value={value} 
+      onChange={onChange} 
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none bg-white text-black"
+      required={required}
+      style={{ backgroundColor: '#ffffff', color: '#000000' }}
+    >
+      <option value="" disabled className="text-gray-400">{placeholder}</option>
+      {options.map((opt) => <option key={opt.id} value={opt.name} className="text-black">{opt.name}</option>)}
+    </select>
+  </div>
+);
 
-  const rows = data.map(item => [
-    item.id,
-    item.createdAt ? formatDateTime(item.createdAt) : '',
-    `"${item.fullName}"`,
-    item.phone,
-    item.email,
-    item.causaFull,
-    item.subject,
-    item.fiscalia || "N/A",
-    item.locker || "N/A"
-  ]);
+const Card = ({ children, className = "", ...props }) => (
+  <div 
+    className={`bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden ${className}`}
+    {...props} 
+  >
+    {children}
+  </div>
+);
 
-  const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
+// --- APP PRINCIPAL ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('landing'); 
+  const [loading, setLoading] = useState(true);
+  const [currentUserData, setCurrentUserData] = useState(null); 
+  const [adminUser, setAdminUser] = useState(null); 
+  const [publicCourseId, setPublicCourseId] = useState(null);
 
-// --- COMPONENTES ---
-
-// 1. Pantalla de Bienvenida y Registro Público
-const PublicRegistration = ({ onViewChange, isConnected }) => {
-  const [step, setStep] = useState('welcome');
-  const [formData, setFormData] = useState({
-    fullName: '',
-    phone: '',
-    email: '',
-    causaCode: '', 
-    causaCodeCustom: '', 
-    causaYear: new Date().getFullYear().toString(),
-    causaNumber: '',
-    subject: '',
-    subjectCustom: '',
-    fiscalia: '',
-    locker: ''
-  });
-  
-  // Listas Dinámicas
-  const [subjectsList, setSubjectsList] = useState([
-    "SINDICADO", "DEFENSA TÉCNICA", "AGRAVIADO", "QUERELLANTE ADHESIVO", 
-    "AUXILIAR FISCAL", "AGENTE FISCAL", "SOLICITANTE"
-  ]);
-
-  const [codesList, setCodesList] = useState([
-    "16004", "16005", "16011", "16012", "16013", 
-    "16014", "16015", "16016", "16017", "16018"
-  ]);
-
-  const [loading, setLoading] = useState(false);
-
-  const yearsList = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let i = currentYear; i >= 1988; i--) {
-      years.push(i.toString());
-    }
-    return years;
-  }, []);
-
-  // Cargar configuración global
   useEffect(() => {
-    if (!isConnected) return;
-    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-    const unsub = onSnapshot(settingsRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.subjects) setSubjectsList(data.subjects);
-        if (data.courtCodes) setCodesList(data.courtCodes);
-      }
-    }, (error) => console.log("Config default cargada"));
-    return () => unsub();
-  }, [isConnected]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const course = params.get('course');
+    const teacher = params.get('teacher');
     
-    // NUEVA REGLA: Restricción estricta de 5 dígitos para campos numéricos de causa
-    // Esto evita que el usuario escriba más de 5 números en "No. Proceso" o "Código Personalizado"
-    if ((name === 'causaNumber' || name === 'causaCodeCustom') && value.length > 5) {
-      return; 
-    }
-
-    const shouldUpper = ['fullName', 'subjectCustom', 'fiscalia', 'locker'].includes(name);
-    setFormData(prev => ({
-      ...prev,
-      [name]: shouldUpper ? value.toUpperCase() : value
-    }));
-  };
-
-  const handleBlurPad = (e) => {
-    const { name, value } = e.target;
-    if (value && value.length > 0) {
-      setFormData(prev => ({
-        ...prev,
-        [name]: padToFive(value)
-      }));
-    }
-  };
-
-  const isFormValid = () => {
-    const basicValid = formData.fullName && formData.phone && formData.email && 
-                       formData.causaYear && formData.causaNumber && 
-                       (formData.causaCode || formData.causaCodeCustom) && formData.subject;
-    
-    if (!basicValid) return false;
-    if (formData.causaCode === 'PERSONALIZAR' && !formData.causaCodeCustom) return false;
-    if (formData.subject === 'PERSONALIZAR' && !formData.subjectCustom) return false;
-    if (['AUXILIAR FISCAL', 'AGENTE FISCAL'].includes(formData.subject) && !formData.fiscalia) return false;
-    if (['DEFENSA TÉCNICA', 'AUXILIAR FISCAL', 'AGENTE FISCAL'].includes(formData.subject) && !formData.locker) return false;
-    return true;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!isFormValid()) return;
-    setLoading(true);
-
-    try {
-      let finalSubject = formData.subject;
-      let updateSettings = false;
-      let newSubjects = [...subjectsList];
-      let newCodes = [...codesList];
-
-      if (formData.subject === 'PERSONALIZAR') {
-        finalSubject = formData.subjectCustom;
-        if (!subjectsList.includes(finalSubject)) {
-          newSubjects = [...subjectsList, finalSubject].sort();
-          updateSettings = true;
-        }
-      }
-
-      let finalCode = formData.causaCode;
-      if (formData.causaCode === 'PERSONALIZAR') {
-        finalCode = padToFive(formData.causaCodeCustom);
-        if (!codesList.includes(finalCode)) {
-          newCodes = [...codesList, finalCode].sort();
-          updateSettings = true;
-        }
-      }
-
-      if (updateSettings) {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global'), { 
-          subjects: newSubjects,
-          courtCodes: newCodes
-        }, { merge: true });
-      }
-
-      const formattedNumber = padToFive(formData.causaNumber);
-      const causaFull = `[C-${finalCode}] - [${formData.causaYear}] - [${formattedNumber}]`;
-
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'), {
-        ...formData,
-        causaCode: finalCode,
-        causaNumber: formattedNumber,
-        subject: finalSubject,
-        causaFull,
-        createdAt: serverTimestamp(),
-        status: 'active'
-      });
-
-      setStep('success');
-    } catch (error) {
-      console.error("Error al registrar:", error);
-      alert("Error al guardar. Verifique conexión.");
-    } finally {
+    if (mode === 'public' && course && teacher) {
+      setPublicCourseId({ courseName: course, teacherEmail: teacher });
+      setView('public-report');
       setLoading(false);
     }
-  };
-
-  if (step === 'welcome') {
-    return (
-      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
-        <div className="bg-white max-w-2xl w-full rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in duration-300">
-          <div className="h-3 bg-[#00A8E8]"></div>
-          <div className="p-8 md:p-12 text-center">
-            <div className="flex justify-center mb-6">
-              <div className="bg-blue-50 p-4 rounded-full">
-                <Gavel className="w-12 h-12 text-[#00A8E8]" />
-              </div>
-            </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-slate-800 mb-4 font-sans">
-              Juzgado Primero de Primera Instancia Penal y de Narcoactividad
-            </h1>
-            <h2 className="text-lg text-slate-600 font-medium mb-8">
-              Departamento de Alta Verapaz
-            </h2>
-            <div className="bg-blue-50 border border-blue-100 p-6 rounded-xl mb-8">
-              <p className="text-slate-700 text-lg leading-relaxed">
-                "Si usted ha sido convocado para participar en una audiencia oral, por favor inicie con el registro de sus datos, necesarios para su debida identificación actualizada y posteriores comunicaciones."
-              </p>
-            </div>
-            <button 
-              onClick={() => setStep('form')}
-              className="w-full md:w-auto bg-[#00A8E8] hover:bg-blue-600 text-white font-bold py-4 px-10 rounded-full text-xl transition-all shadow-lg hover:shadow-blue-200 transform hover:-translate-y-1"
-            >
-              Inicie registro
-            </button>
-            <div className="mt-8 text-sm text-slate-400">
-              <button onClick={() => onViewChange('login')} className="hover:text-[#00A8E8] underline">
-                Acceso Administrativo
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (step === 'success') {
-    return (
-      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
-        <div className="bg-white max-w-lg w-full rounded-2xl shadow-xl overflow-hidden p-8 text-center animate-fade-in">
-          <div className="flex justify-center mb-6">
-            <CheckCircle className="w-20 h-20 text-green-500" />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-4">¡Registro Exitoso!</h2>
-          <p className="text-slate-600 text-lg mb-8">
-            Su información ha sido enviada para el registro correspondiente. Espere que se autorice su acceso a la Sala de Audiencias. Gracias.
-          </p>
-          <button 
-            onClick={() => {
-              setFormData({
-                fullName: '', phone: '', email: '', 
-                causaCode: '', causaCodeCustom: '',
-                causaYear: new Date().getFullYear().toString(), 
-                causaNumber: '', 
-                subject: '', subjectCustom: '', fiscalia: '', locker: ''
-              });
-              setStep('welcome');
-            }}
-            className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-lg transition-colors"
-          >
-            Volver al Inicio
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-100 py-8 px-4 flex justify-center items-start">
-      <div className="bg-white max-w-3xl w-full rounded-2xl shadow-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
-        <div className="h-2 bg-[#00A8E8]"></div>
-        <div className="p-6 md:p-8">
-          <div className="flex justify-between items-center mb-8">
-            <h2 className="text-2xl font-bold text-slate-800">Formulario de Registro</h2>
-            <button onClick={() => setStep('welcome')} className="text-slate-400 hover:text-slate-600">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Nombres y Apellidos Completos *</label>
-                <input 
-                  type="text" name="fullName" value={formData.fullName} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-                  placeholder="Ingrese su nombre completo"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Teléfono *</label>
-                <input 
-                  type="number" name="phone" value={formData.phone} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-                  placeholder="Número telefónico"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Correo Electrónico *</label>
-                <input 
-                  type="email" name="email" value={formData.email} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-                  placeholder="ejemplo@correo.com"
-                />
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm">
-              <label className="block text-sm font-bold text-slate-700 mb-4 border-b border-slate-200 pb-2">
-                IDENTIFICACIÓN DE LA CAUSA
-              </label>
-              
-              <div className="flex flex-col md:flex-row md:items-start space-y-4 md:space-y-0 md:space-x-4">
-                <div className="w-full md:w-1/3">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Código de Juzgado</label>
-                  <div className="flex items-center">
-                    <span className="text-slate-400 font-bold mr-2 text-lg">C-</span>
-                    <select 
-                      name="causaCode" value={formData.causaCode} onChange={handleInputChange}
-                      className="w-full px-3 py-2 rounded border border-slate-300 font-mono text-sm focus:border-[#00A8E8] outline-none"
-                    >
-                      <option value="">Seleccione...</option>
-                      {codesList.map(c => <option key={c} value={c}>{c}</option>)}
-                      <option value="PERSONALIZAR">OTRO (PERSONALIZAR)</option>
-                    </select>
-                  </div>
-                  {formData.causaCode === 'PERSONALIZAR' && (
-                    <input 
-                      type="number" name="causaCodeCustom" value={formData.causaCodeCustom} onChange={handleInputChange} onBlur={handleBlurPad}
-                      placeholder="Ej: 16020" className="mt-2 w-full px-3 py-2 rounded border border-[#00A8E8] font-mono text-sm animate-in fade-in"
-                    />
-                  )}
-                </div>
-
-                <div className="hidden md:flex items-center justify-center h-16">
-                  <span className="text-slate-300 font-bold text-xl">-</span>
-                </div>
-
-                <div className="w-full md:w-1/4">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Año</label>
-                  <select 
-                    name="causaYear" value={formData.causaYear} onChange={handleInputChange}
-                    className="w-full px-3 py-2 rounded border border-slate-300 font-mono text-center focus:border-[#00A8E8] outline-none"
-                  >
-                    {yearsList.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                </div>
-
-                <div className="hidden md:flex items-center justify-center h-16">
-                  <span className="text-slate-300 font-bold text-xl">-</span>
-                </div>
-
-                <div className="w-full md:flex-1">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">No. Proceso</label>
-                  <input 
-                    type="number" name="causaNumber" value={formData.causaNumber} onChange={handleInputChange} onBlur={handleBlurPad} required
-                    className="w-full px-3 py-2 rounded border border-slate-300 font-mono focus:border-[#00A8E8] outline-none"
-                    placeholder="00123"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">Se ajustará a 5 dígitos automáticamente</p>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Sujeto Procesal *</label>
-              <select 
-                name="subject" value={formData.subject} onChange={handleInputChange} required
-                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none bg-white"
-              >
-                <option value="">Seleccione una opción...</option>
-                {subjectsList.map(s => <option key={s} value={s}>{s}</option>)}
-                <option value="PERSONALIZAR">OTRO (PERSONALIZAR)</option>
-              </select>
-            </div>
-
-            {formData.subject === 'PERSONALIZAR' && (
-              <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-                <label className="block text-sm font-semibold text-[#00A8E8] mb-2">Especifique el Sujeto Procesal *</label>
-                <input 
-                  type="text" name="subjectCustom" value={formData.subjectCustom} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none"
-                  placeholder="INGRESE EL ROL..."
-                />
-              </div>
-            )}
-
-            {(formData.subject === 'AUXILIAR FISCAL' || formData.subject === 'AGENTE FISCAL') && (
-               <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Identifique la Fiscalía *</label>
-                <input 
-                  type="text" name="fiscalia" value={formData.fiscalia} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none"
-                  placeholder="EJ: FISCALÍA DE LA MUJER..."
-                />
-              </div>
-            )}
-
-            {['DEFENSA TÉCNICA', 'AUXILIAR FISCAL', 'AGENTE FISCAL'].includes(formData.subject) && (
-               <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Casillero Electrónico *</label>
-                <input 
-                  type="text" name="locker" value={formData.locker} onChange={handleInputChange} required
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-2 focus:ring-blue-100 outline-none"
-                  placeholder="EJ: ABOGADO123"
-                />
-              </div>
-            )}
-
-            <div className="pt-4">
-              <button 
-                type="submit" disabled={!isFormValid() || loading}
-                className={`w-full py-4 rounded-lg font-bold text-lg transition-all shadow-lg ${
-                  isFormValid() && !loading 
-                    ? 'bg-[#00A8E8] hover:bg-blue-600 text-white transform hover:-translate-y-1' 
-                    : 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                }`}
-              >
-                {loading ? 'Enviando...' : 'ENVIAR REGISTRO'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// 2. Login y Registro de Funcionarios
-const AuthScreen = ({ onViewChange, onLogin }) => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
-
-  const handleAuth = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccessMsg('');
-    setLoading(true);
-
-    try {
-      if (isLogin) {
-        // En Producción, usamos Auth real. 
-        // Para el caso de admin hardcoded (solo si auth falla o es bypass):
-        if (email.trim() === 'admin@juzgado.gob.gt' && password === 'Admin2024!') {
-          onLogin({ role: 'admin', name: 'Administrador', uid: 'admin-sys' });
-          return;
-        }
-
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'directory', userCredential.user.uid));
-        
-        let userData = { uid: userCredential.user.uid, role: 'auxiliar', status: 'pending' };
-        if (userDoc.exists()) {
-           userData = { ...userDoc.data(), uid: userCredential.user.uid };
-        }
-
-        if (userData.status === 'pending') {
-          await signOut(auth);
-          setError("Su cuenta está pendiente de aprobación.");
-          setLoading(false);
-          return;
-        }
-        
-        onLogin(userData);
-
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCredential.user, { displayName: name });
-        
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'directory', userCredential.user.uid), {
-          uid: userCredential.user.uid,
-          name: name,
-          email: email,
-          role: 'auxiliar',
-          status: 'pending',
-          createdAt: serverTimestamp()
-        });
-
-        await signOut(auth);
-        setSuccessMsg("Solicitud enviada. Espere aprobación.");
-        setIsLogin(true);
-      }
-    } catch (err) {
-      console.error(err);
-      if (email.trim() === 'admin@juzgado.gob.gt' && password === 'Admin2024!') {
-          // Fallback por si Firebase Auth falla para el admin predefinido
-          onLogin({ role: 'admin', name: 'Administrador', uid: 'admin-sys' });
-      } else {
-         setError("Error de autenticación. Verifique credenciales.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-300">
-        <div className="h-2 bg-[#00A8E8]"></div>
-        <div className="p-8">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-800">
-              {isLogin ? 'Acceso al Sistema' : 'Solicitud de Acceso'}
-            </h2>
-            <p className="text-slate-500 mt-2">
-              {isLogin ? 'Ingrese sus credenciales institucionales' : 'Registro para Auxiliares Judiciales'}
-            </p>
-          </div>
-
-          {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm font-medium">{error}</div>}
-          {successMsg && <div className="bg-green-50 text-green-600 p-3 rounded-lg mb-4 text-sm font-medium">{successMsg}</div>}
-
-          <form onSubmit={handleAuth} className="space-y-5">
-            {!isLogin && (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo</label>
-                <div className="relative">
-                  <Users className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-                  <input 
-                    type="text" value={name} onChange={e => setName(e.target.value)} required
-                    className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-1 focus:ring-blue-100 outline-none"
-                    placeholder="Juan Pérez"
-                  />
-                </div>
-              </div>
-            )}
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Usuario / Email</label>
-              <div className="relative">
-                <Users className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-                <input 
-                  type="email" value={email} onChange={e => setEmail(e.target.value)} required
-                  className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-1 focus:ring-blue-100 outline-none"
-                  placeholder="usuario@dominio.com"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
-              <div className="relative">
-                <Shield className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-                <input 
-                  type="password" value={password} onChange={e => setPassword(e.target.value)} required
-                  className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:border-[#00A8E8] focus:ring-1 focus:ring-blue-100 outline-none"
-                  placeholder={isLogin ? "••••••••" : "Cree una contraseña"}
-                />
-              </div>
-            </div>
-
-            <button 
-              type="submit" disabled={loading}
-              className="w-full bg-[#00A8E8] hover:bg-blue-600 text-white font-bold py-3 rounded-lg transition-colors shadow-md"
-            >
-              {loading ? 'Procesando...' : (isLogin ? 'Iniciar Sesión' : 'Enviar Solicitud')}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center pt-6 border-t border-slate-100">
-            <button 
-              onClick={() => { setIsLogin(!isLogin); setError(''); setSuccessMsg(''); }}
-              className="text-sm text-[#00A8E8] font-medium hover:underline"
-            >
-              {isLogin ? '¿No tiene cuenta? Solicitar acceso como Auxiliar' : '¿Ya tiene cuenta? Iniciar Sesión'}
-            </button>
-            <div className="mt-4">
-              <button onClick={() => onViewChange('welcome')} className="text-xs text-slate-400 hover:text-slate-600">
-                ← Volver al Kiosco Público
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// 3. Dashboard Administrativo
-const Dashboard = ({ user, onLogout }) => {
-  const [registrations, setRegistrations] = useState([]);
-  const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
-  const [currentView, setCurrentView] = useState('registros');
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [copiedGroup, setCopiedGroup] = useState(null);
-
-  useEffect(() => {
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setRegistrations(docs);
-    }, (error) => console.error("Error cargando registros:", error));
-    return () => unsubscribe();
   }, []);
 
+  if (!isConfigured) return <div className="p-10 text-center">Configura Firebase en el código.</div>;
+
   useEffect(() => {
-    if (user.role !== 'admin') return;
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'directory'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPendingUsers(users);
-    }, (error) => console.error("Error usuarios:", error));
-    return () => unsubscribe();
-  }, [user]);
-
-  const groupedRegistrations = useMemo(() => {
-    const filtered = registrations.filter(r => {
-      if (!r.createdAt) return false;
-      const regDate = new Date(r.createdAt.seconds * 1000).toISOString().split('T')[0];
-      return regDate === filterDate;
-    });
-    const groups = {};
-    filtered.forEach(reg => {
-      if (!groups[reg.causaFull]) groups[reg.causaFull] = [];
-      groups[reg.causaFull].push(reg);
-    });
-    return groups;
-  }, [registrations, filterDate]);
-
-  const copyEmails = (emails, groupId) => {
-    const emailString = emails.join('; ');
-    navigator.clipboard.writeText(emailString);
-    setCopiedGroup(groupId);
-    setTimeout(() => setCopiedGroup(null), 2000);
-  };
-
-  const handleUserAction = async (userId, action) => {
-    try {
-      if (action === 'approve') {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'directory', userId), { status: 'active' });
-      } else if (action === 'delete') {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'directory', userId));
+    if (!auth) return;
+    const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) {} };
+    initAuth();
+    return onAuthStateChanged(auth, (u) => {
+      if(!publicCourseId) {
+        setUser(u);
+        setLoading(false);
       }
-    } catch (err) {
-      console.error(err);
-      alert("Error al gestionar usuario");
-    }
+    });
+  }, [publicCourseId]);
+
+  const handleLogout = () => {
+    setCurrentUserData(null);
+    setAdminUser(null);
+    setView('landing');
+    window.history.pushState({}, '', window.location.pathname);
   };
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>;
 
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
-      <aside className="w-64 bg-slate-900 text-white flex-shrink-0 hidden md:flex flex-col">
-        <div className="p-6 border-b border-slate-800">
-          <div className="flex items-center space-x-3 mb-1">
-            <div className="w-8 h-8 bg-[#00A8E8] rounded-lg flex items-center justify-center">
-              <Gavel className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-xl tracking-wide">Juzgado 1°</span>
+    <div className="min-h-screen bg-slate-50 font-sans text-gray-800">
+      <header className="bg-white border-b sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => !publicCourseId && setView('landing')}>
+            <div className="bg-blue-600 p-2 rounded-lg"><QrCode size={20} className="text-white" /></div>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent">AsistenciaQR Pro</h1>
           </div>
-          <span className="text-xs text-slate-400 uppercase tracking-widest">Gestión de Audiencias</span>
-        </div>
-        
-        <nav className="flex-1 py-6 px-3 space-y-1">
-          <button 
-            onClick={() => setCurrentView('registros')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${currentView === 'registros' ? 'bg-[#00A8E8] text-white shadow-lg shadow-blue-900/50' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-          >
-            <LayoutDashboard className="w-5 h-5" />
-            <span className="font-medium">Dashboard</span>
-          </button>
-          
-          {user.role === 'admin' && (
-            <button 
-              onClick={() => setCurrentView('usuarios')}
-              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${currentView === 'usuarios' ? 'bg-[#00A8E8] text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-            >
-              <Users className="w-5 h-5" />
-              <span className="font-medium">Usuarios</span>
-            </button>
-          )}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800">
-           <div className="flex items-center space-x-3 mb-4 px-2">
-             <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold">
-               {user.name ? user.name.charAt(0) : 'U'}
-             </div>
-             <div>
-               <p className="text-sm font-medium text-white">{user.name}</p>
-               <p className="text-xs text-slate-400 capitalize">{user.role}</p>
-             </div>
-           </div>
-           <button onClick={onLogout} className="w-full flex items-center justify-center space-x-2 bg-slate-800 hover:bg-red-600/20 hover:text-red-400 text-slate-400 py-2 rounded-lg transition-colors text-sm">
-            <LogOut className="w-4 h-4" /> <span>Cerrar Sesión</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 md:px-8">
-           <div className="md:hidden flex items-center"><Menu className="w-6 h-6 text-slate-600" /></div>
-           <div className="flex-1 px-4 md:px-0"><h1 className="text-xl md:text-2xl font-bold text-slate-800">{currentView === 'registros' ? 'Audiencias del Día' : 'Gestión de Personal'}</h1></div>
-           <div className="flex items-center space-x-4">
-             <div className="hidden md:flex bg-slate-100 rounded-full px-4 py-2 items-center text-slate-500 text-sm">
-               <Calendar className="w-4 h-4 mr-2" />
-               {new Date().toLocaleDateString('es-GT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-             </div>
-           </div>
-        </header>
-
-        <div className="flex-1 overflow-auto p-6 md:p-8 bg-[#F5F7FB]">
-          {currentView === 'registros' && (
-            <div className="max-w-7xl mx-auto space-y-6">
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center space-x-4 w-full md:w-auto">
-                   <div className="bg-blue-50 p-3 rounded-xl"><FileText className="w-6 h-6 text-[#00A8E8]" /></div>
-                   <div><p className="text-sm text-slate-500">Total Registros</p><p className="text-2xl font-bold text-slate-800">{Object.values(groupedRegistrations).flat().length}</p></div>
-                </div>
-                <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                  <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 focus:outline-none focus:border-[#00A8E8]"/>
-                  <button onClick={() => setFilterDate(new Date().toISOString().split('T')[0])} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 font-medium text-sm transition-colors">Hoy</button>
-                  <button onClick={() => exportToCSV(registrations, `Registros_${new Date().toISOString().split('T')[0]}.csv`)} className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm transition-colors"><Download className="w-4 h-4 mr-2" />Exportar Excel</button>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                {Object.keys(groupedRegistrations).length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="bg-slate-100 inline-flex p-4 rounded-full mb-4"><Search className="w-8 h-8 text-slate-400" /></div>
-                    <h3 className="text-lg font-medium text-slate-600">No hay registros para esta fecha</h3>
-                  </div>
-                ) : (
-                  Object.entries(groupedRegistrations).map(([causa, items]) => (
-                    <div key={causa} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                      <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-                        <div><p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Causa</p><h3 className="text-lg font-bold text-slate-800 font-mono">{causa}</h3></div>
-                        <button onClick={() => copyEmails(items.map(i => i.email), causa)} className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${copiedGroup === causa ? 'bg-green-100 text-green-700' : 'bg-blue-50 text-[#00A8E8] hover:bg-blue-100'}`}>
-                          {copiedGroup === causa ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}<span>{copiedGroup === causa ? 'Copiado' : 'Copiar Emails'}</span>
-                        </button>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                          <thead className="bg-white text-slate-500 text-xs uppercase font-semibold">
-                            <tr><th className="px-6 py-3">Nombre</th><th className="px-6 py-3">Rol</th><th className="px-6 py-3">Contacto</th><th className="px-6 py-3">Detalles</th><th className="px-6 py-3">Hora</th></tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50 text-sm text-slate-600">
-                            {items.map(item => (
-                              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4 font-medium text-slate-800">{item.fullName}</td>
-                                <td className="px-6 py-4"><span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{item.subject}</span></td>
-                                <td className="px-6 py-4 space-y-1"><div className="flex items-center text-xs"><span className="w-16 text-slate-400">Tel:</span> {item.phone}</div><div className="flex items-center text-xs"><span className="w-16 text-slate-400">Email:</span> {item.email}</div></td>
-                                <td className="px-6 py-4 space-y-1">{item.fiscalia && <div className="text-xs"><span className="text-slate-400">Fiscalía:</span> {item.fiscalia}</div>}{item.locker && <div className="text-xs"><span className="text-slate-400">Casillero:</span> {item.locker}</div>}</td>
-                                <td className="px-6 py-4 text-slate-500">{new Date(item.createdAt.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+          {view !== 'landing' && view !== 'public-report' && (
+            <div className="flex items-center gap-4">
+              {adminUser && <span className="text-sm font-medium hidden md:block text-gray-600">Hola, {adminUser.name}</span>}
+              <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1"><LogOut size={16} /> Salir</button>
             </div>
           )}
-
-          {currentView === 'usuarios' && user.role === 'admin' && (
-            <div className="max-w-5xl mx-auto space-y-8">
-              <div className="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
-                <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex items-center space-x-2"><Bell className="w-5 h-5 text-orange-500" /><h3 className="font-bold text-orange-900">Solicitudes Pendientes</h3></div>
-                <div className="divide-y divide-slate-100">
-                  {pendingUsers.filter(u => u.status === 'pending').length === 0 ? <p className="p-6 text-slate-400 text-center text-sm">No hay solicitudes.</p> : pendingUsers.filter(u => u.status === 'pending').map(u => (
-                      <div key={u.id} className="p-6 flex items-center justify-between">
-                        <div><p className="font-bold text-slate-800">{u.name}</p><p className="text-sm text-slate-500">{u.email}</p></div>
-                        <div className="flex space-x-3"><button onClick={() => handleUserAction(u.id, 'delete')} className="text-red-500 text-sm px-3 py-2">Rechazar</button><button onClick={() => handleUserAction(u.id, 'approve')} className="bg-[#00A8E8] text-white px-4 py-2 rounded-lg text-sm">Aprobar</button></div>
-                      </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {view === 'public-report' && (
+             <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full border border-green-200">Vista Pública</span>
           )}
         </div>
+      </header>
+      <main className="max-w-6xl mx-auto p-4 md:p-6">
+        {view === 'landing' && <LandingScreen setView={setView} />}
+        {view === 'admin-login' && <AdminLogin setView={setView} setAdminUser={setAdminUser} appId={appId} />}
+        {view === 'admin-register' && <AdminRegister setView={setView} appId={appId} />}
+        {view === 'student-login' && <StudentLogin setView={setView} setCurrentUserData={setCurrentUserData} user={user} appId={appId} />}
+        {view === 'student-register' && <StudentRegister setView={setView} setCurrentUserData={setCurrentUserData} user={user} appId={appId} />}
+        {view === 'admin-dash' && <AdminDashboard user={user} adminUser={adminUser} appId={appId} />}
+        {view === 'student-dash' && <StudentDashboard userData={currentUserData} user={user} appId={appId} />}
+        {view === 'public-report' && <PublicReportView publicData={publicCourseId} appId={appId} />}
       </main>
     </div>
   );
+}
+
+// --- PANTALLAS ---
+const LandingScreen = ({ setView }) => (
+  <div className="flex flex-col items-center justify-center py-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="text-center mb-10 max-w-lg">
+      <h2 className="text-3xl font-bold text-gray-900 mb-4">Registro de Asistencia Inteligente</h2>
+      <p className="text-gray-600">Plataforma segura para el control de asistencia en el aula.</p>
+    </div>
+    <div className="grid md:grid-cols-2 gap-6 w-full max-w-2xl">
+      <Card className="hover:ring-2 hover:ring-blue-500 cursor-pointer group p-8 flex flex-col items-center text-center h-full" onClick={() => setView('student-login')}>
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><User size={32} className="text-blue-600" /></div>
+          <h3 className="text-xl font-bold mb-2">Soy Estudiante</h3>
+          <Button className="w-full mt-auto">Acceder</Button>
+      </Card>
+      <Card className="hover:ring-2 hover:ring-indigo-500 cursor-pointer group p-8 flex flex-col items-center text-center h-full" onClick={() => setView('admin-login')}>
+          <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Lock size={32} className="text-indigo-600" /></div>
+          <h3 className="text-xl font-bold mb-2">Soy Docente</h3>
+          <Button variant="secondary" className="w-full mt-auto">Administración</Button>
+      </Card>
+    </div>
+  </div>
+);
+
+const AdminLogin = ({ setView, setAdminUser, appId }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), where("email", "==", email), where("password", "==", password));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const d = snap.docs[0].data();
+        if (d.status !== 'approved' && d.role !== 'superadmin') return alert("Cuenta no aprobada");
+        setAdminUser({ ...d, id: snap.docs[0].id });
+        setView('admin-dash');
+      } else alert("Credenciales incorrectas");
+    } catch (e) { console.error(e); }
+  };
+  return (
+    <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl font-bold mb-6 text-center">Acceso Docente</h2><form onSubmit={handleLogin}><Input label="Email" value={email} onChange={e=>setEmail(e.target.value)} /><Input label="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} /><Button className="w-full" type="submit">Entrar</Button><div className="mt-4 text-center"><a onClick={()=>setView('admin-register')} className="text-blue-600 cursor-pointer">Registrarse</a></div></form></Card></div>
+  );
+};
+const AdminRegister = ({ setView, appId }) => {
+    const [f, setF] = useState({name:'', email:'', password:'', secretCode:''});
+    const reg = async (e) => {
+        e.preventDefault();
+        const role = f.secretCode === MASTER_KEY ? 'superadmin' : 'docente';
+        const status = role === 'superadmin' ? 'approved' : 'pending';
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), {...f, role, status, createdAt: serverTimestamp()});
+        alert("Solicitud enviada"); setView('admin-login');
+    };
+    return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Registro</h2><form onSubmit={reg}><Input label="Nombre" value={f.name} onChange={e=>setF({...f, name:e.target.value})} /><Input label="Email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} /><Input label="Password" type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} /><Input label="Código (Opcional)" value={f.secretCode} onChange={e=>setF({...f, secretCode:e.target.value})} /><Button className="w-full" type="submit">Registrar</Button></form></Card></div>
+};
+const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
+    const [c, setC] = useState([]); const [sel, setSel] = useState(''); const [id, setId] = useState('');
+    useEffect(() => { 
+        if(user) onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), orderBy('name')), 
+        s=>setC(s.docs.map(d=>({ id: d.id, ...d.data() })))) 
+    }, [user]);
+    const log = async (e) => { e.preventDefault(); const s = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("carne", "==", id))); if(!s.empty){ setCurrentUserData({...s.docs[0].data(), currentCourse: sel}); setView('student-dash'); } else alert("No encontrado"); };
+    return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Estudiante</h2><form onSubmit={log}><Select label="Curso" value={sel} onChange={e=>setSel(e.target.value)} options={c} placeholder="Elige..." /><Input label="ID" value={id} onChange={e=>setId(e.target.value)} /><Button className="w-full" type="submit">Entrar</Button><div className="mt-4 text-center"><a onClick={()=>setView('student-register')} className="text-blue-600 cursor-pointer">Crear cuenta</a></div></form></Card></div>
+};
+const StudentRegister = ({ setView, user, appId }) => {
+    const [f, setF] = useState({name:'', carne:'', email:''});
+    const reg = async (e) => { e.preventDefault(); await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), {...f, deviceId: user.uid}); alert("Listo"); setView('student-login'); };
+    return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Registro Estudiante</h2><form onSubmit={reg}><Input label="Nombre" value={f.name} onChange={e=>setF({...f, name:e.target.value})} /><Input label="ID" value={f.carne} onChange={e=>setF({...f, carne:e.target.value})} /><Input label="Email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} /><Button className="w-full" type="submit">Registrar</Button></form></Card></div>
 };
 
-export default function App() {
-  const [view, setView] = useState('welcome');
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
+// --- COMPONENTE DE ESTADÍSTICAS AVANZADAS ---
+const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDate, setStartDate }) => {
+  // 1. Filtrar datos por fecha si existe (Con corrección de zona horaria)
+  const filteredData = startDate ? attendanceData.filter(r => {
+    if (!r.timestamp) return false;
+    const recordDate = r.timestamp.toDate();
+    const year = recordDate.getFullYear();
+    const month = String(recordDate.getMonth() + 1).padStart(2, '0');
+    const day = String(recordDate.getDate()).padStart(2, '0');
+    const recordDateString = `${year}-${month}-${day}`;
+    return recordDateString >= startDate;
+  }) : attendanceData;
+
+  const sessions = [...new Set(filteredData.map(r => r.sessionCode))];
+  const totalClasses = sessions.length || 1; 
+
+  const studentStats = {};
+  filteredData.forEach(r => {
+    if (!studentStats[r.studentCarne]) {
+      studentStats[r.studentCarne] = { name: r.studentName, count: 0, id: r.studentCarne };
+    }
+    studentStats[r.studentCarne].count += 1;
+  });
+
+  const report = Object.values(studentStats).map(s => ({
+    ...s,
+    percentage: Math.round((s.count / totalClasses) * 100),
+    status: (s.count / totalClasses) >= 0.8 ? 'Aprobado' : 'Riesgo'
+  }));
+
+  const pieData = [
+    { name: 'Aprobado (>80%)', value: report.filter(r => r.percentage >= 80).length, color: '#22c55e' },
+    { name: 'Riesgo (<80%)', value: report.filter(r => r.percentage < 80).length, color: '#ef4444' },
+  ].filter(d => d.value > 0);
+
+  const generatePublicLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?mode=public&course=${encodeURIComponent(course.name)}&teacher=${encodeURIComponent(adminEmail)}`;
+    navigator.clipboard.writeText(url);
+    alert("🔗 Enlace público copiado al portapapeles.\n\nCualquier persona con este enlace podrá ver este reporte.");
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div className="bg-gray-50 border p-4 rounded-lg flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="text-sm text-gray-600 flex items-center gap-2">
+           <Calendar size={18} />
+           <span>Analizando datos a partir de:</span>
+        </div>
+        <input 
+          type="date" 
+          value={startDate} 
+          onChange={(e) => setStartDate(e.target.value)}
+          className="px-3 py-2 border rounded-md bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-6">
+        <Card className="flex-1 p-6 flex flex-col items-center">
+          <h4 className="font-bold mb-4 text-gray-700">Estado General del Grupo</h4>
+          {pieData.length > 0 ? (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <p className="text-gray-400 py-10">Sin datos en el periodo seleccionado</p>}
+        </Card>
+
+        <Card className="flex-1 p-6">
+          <h4 className="font-bold mb-4 text-gray-700">Métricas Clave</h4>
+          <div className="space-y-4">
+            <div className="flex justify-between p-3 bg-blue-50 rounded">
+              <span>Clases Impartidas:</span>
+              <span className="font-bold text-blue-700">{totalClasses}</span>
+            </div>
+            <div className="flex justify-between p-3 bg-gray-50 rounded">
+              <span>Total Alumnos:</span>
+              <span className="font-bold">{report.length}</span>
+            </div>
+            <Button variant="outline" onClick={generatePublicLink} className="w-full mt-4" icon={Share2}>
+              Compartir Reporte Público
+            </Button>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="overflow-hidden">
+        <div className="p-4 bg-gray-50 border-b font-bold flex justify-between">
+            <span>Detalle por Estudiante</span>
+            <span className="text-xs text-gray-500 font-normal self-center">Base: {totalClasses} sesiones</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-white text-gray-500 border-b">
+              <tr>
+                <th className="p-3">Estudiante</th>
+                <th className="p-3">Asistencias</th>
+                <th className="p-3">% Acumulado</th>
+                <th className="p-3">Estatus</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.map(r => (
+                <tr key={r.id} className="border-b hover:bg-gray-50">
+                  <td className="p-3 font-medium">{r.name} <div className="text-xs text-gray-400">{r.id}</div></td>
+                  <td className="p-3">{r.count} / {totalClasses}</td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all" 
+                             style={{ width: `${r.percentage}%`, backgroundColor: r.percentage >= 80 ? '#22c55e' : '#ef4444' }}></div>
+                      </div>
+                      {r.percentage}%
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    {r.percentage >= 80 ? (
+                      <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">OK</span>
+                    ) : (
+                      <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">BAJA</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {report.length === 0 && (
+                <tr><td colSpan="4" className="p-4 text-center text-gray-400">No hay asistencias registradas en este periodo.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {onReset && (
+        <div className="border border-red-200 rounded-xl p-6 bg-red-50 mt-8">
+           <h4 className="font-bold text-red-700 mb-2 flex items-center gap-2"><AlertTriangle size={20}/> Zona de Peligro</h4>
+           <p className="text-sm text-red-600 mb-4">
+             Si deseas iniciar un nuevo ciclo escolar o cometiste errores, puedes reiniciar el historial. 
+             Esta acción eliminará <strong>permanentemente</strong> todos los registros de asistencia de este curso.
+           </p>
+           <Button variant="danger" onClick={() => onReset(course.name)} icon={Eraser}>
+             Reiniciar Historial del Curso
+           </Button>
+        </div>
+      )}
+
+    </div>
+  );
+};
+
+// 5. Admin Dashboard
+const AdminDashboard = ({ user, adminUser, appId }) => {
+  const [tab, setTab] = useState('session'); // session | stats
+  const [sessionCode, setSessionCode] = useState(null);
+  const [courses, setCourses] = useState([]);
+  const [allRecords, setAllRecords] = useState([]); 
+  const [newCourseName, setNewCourseName] = useState('');
+  const [selectedStatCourse, setSelectedStatCourse] = useState(''); 
+  const [startDate, setStartDate] = useState(''); 
 
   useEffect(() => {
-    const initAuth = async () => {
-       // Check for standard Firebase Auth
-       if (auth.currentUser) return;
-       // Try anonymous if not logged in
-       try { await signInWithEmailAndPassword(auth, "dummy", "dummy"); } catch(e) {} // Just to trigger init
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setIsConnected(!!currentUser);
-      if (currentUser) {
-          const userDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'directory', currentUser.uid));
-          if (userDoc.exists()) {
-              setUser({ ...userDoc.data(), uid: currentUser.uid });
-          } else {
-             // Es admin hardcoded o usuario nuevo sin doc?
-             if(currentUser.email === 'admin@juzgado.gob.gt') setUser({ uid: currentUser.uid, role: 'admin', name: 'Admin' });
-          }
-      } else {
-          setUser(null);
+    if (!user || !adminUser) return;
+    const q = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), 
+      where("createdBy", "==", adminUser.email), 
+      orderBy('name')
+    );
+    const qSimple = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), where("createdBy", "==", adminUser.email));
+    return onSnapshot(qSimple, (snap) => {
+      setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, [user, adminUser, appId]);
+
+  useEffect(() => {
+    if (!user || courses.length === 0) return;
+    const myCourseNames = courses.map(c => c.name);
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), orderBy('timestamp', 'desc'));
+    return onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data(), dateStr: d.data().timestamp?.toDate().toLocaleString() }));
+      const myRecords = data.filter(r => myCourseNames.includes(r.courseName));
+      setAllRecords(myRecords);
+    });
+  }, [user, courses, appId]);
+
+  const handleAddCourse = async (e) => { 
+    e.preventDefault(); 
+    if(newCourseName.trim()) { 
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), { 
+        name: newCourseName.trim(), 
+        createdBy: adminUser.email, 
+        createdAt: serverTimestamp() 
+      }); 
+      setNewCourseName(''); 
+    }
+  };
+
+  const handleResetCourse = async (courseName) => {
+    if(confirm(`⚠️ ¿ATENCIÓN DOCENTE!\n\nEstás a punto de ELIMINAR PERMANENTEMENTE todo el historial de asistencia del curso: "${courseName}".\n\nEsta acción NO se puede deshacer.\n¿Estás seguro de continuar?`)) {
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), where("courseName", "==", courseName));
+      try {
+        const snapshot = await getDocs(q);
+        const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+        alert(`Historial del curso "${courseName}" eliminado correctamente.`);
+      } catch (error) {
+        console.error("Error borrando:", error);
+        alert("Hubo un error al intentar borrar los datos.");
       }
+    }
+  };
+
+  const generateNewSession = () => setSessionCode(`SESION-${Date.now().toString().slice(-4)}`);
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white border p-4 rounded-xl flex justify-between items-center shadow-sm">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Panel de Control</h2>
+          <p className="text-sm text-gray-500">{adminUser.role === 'superadmin' ? 'Super Administrador' : 'Docente'} | {adminUser.email}</p>
+        </div>
+        <div className="flex bg-gray-100 p-1 rounded-lg">
+          <button onClick={() => setTab('session')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${tab === 'session' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>Sesión</button>
+          <button onClick={() => setTab('stats')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${tab === 'stats' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>Estadísticas</button>
+        </div>
+      </div>
+
+      {tab === 'session' ? (
+        <div className="grid md:grid-cols-3 gap-6">
+          <Card className="md:col-span-1 p-6 h-[450px] flex flex-col">
+            <h3 className="font-bold mb-4 flex items-center gap-2"><BookOpen size={18}/> Mis Cursos</h3>
+            <form onSubmit={handleAddCourse} className="flex gap-2 mb-4">
+              <input value={newCourseName} onChange={e=>setNewCourseName(e.target.value)} className="flex-1 border rounded px-3 text-sm" placeholder="Nuevo curso..." />
+              <button className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700"><Plus size={16}/></button>
+            </form>
+            <div className="flex-1 overflow-auto space-y-2">
+              {courses.length === 0 && <p className="text-gray-400 text-center text-sm mt-10">Crea tu primer curso</p>}
+              {courses.map(c => (
+                <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded group">
+                  <span className="font-medium text-sm">{c.name}</span>
+                  <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_courses', c.id))} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="md:col-span-1 p-6 flex flex-col items-center justify-center text-center">
+             {sessionCode ? (
+               <div className="animate-in zoom-in">
+                 <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${sessionCode}`} className="mb-4 mix-blend-multiply" />
+                 <p className="font-mono text-xl font-bold tracking-widest mb-4">{sessionCode}</p>
+                 <Button variant="danger" onClick={()=>setSessionCode(null)} className="w-full">Terminar Clase</Button>
+               </div>
+             ) : (
+               <div className="text-center">
+                 <QrCode size={64} className="text-gray-200 mx-auto mb-4" />
+                 <p className="text-gray-500 mb-6">Genera un código QR para que<br/>tus alumnos fichen asistencia.</p>
+                 <Button onClick={generateNewSession} className="w-full">Generar QR Nuevo</Button>
+               </div>
+             )}
+          </Card>
+
+          <Card className="md:col-span-1 p-6 h-[450px] overflow-hidden flex flex-col">
+             <h3 className="font-bold mb-4 flex items-center gap-2"><RefreshCw size={18}/> Actividad Reciente</h3>
+             <div className="flex-1 overflow-auto space-y-3">
+               {allRecords.slice(0, 20).map(r => (
+                 <div key={r.id} className="border-l-4 border-blue-500 pl-3 py-1">
+                   <p className="font-bold text-sm text-gray-800">{r.studentName}</p>
+                   <div className="flex justify-between text-xs text-gray-500">
+                     <span>{r.courseName}</span>
+                     <span>{r.dateStr.split(',')[1]}</span>
+                   </div>
+                 </div>
+               ))}
+               {allRecords.length === 0 && <p className="text-center text-gray-400 mt-10">Sin actividad hoy</p>}
+             </div>
+          </Card>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
+            <label className="font-bold text-gray-700">Analizar Curso:</label>
+            <select 
+              value={selectedStatCourse} 
+              onChange={(e) => setSelectedStatCourse(e.target.value)}
+              className="px-4 py-2 border rounded-lg bg-gray-50 min-w-[200px]"
+            >
+              <option value="">-- Selecciona --</option>
+              {courses.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+
+          {selectedStatCourse ? (
+             <StatsView 
+                course={courses.find(c => c.name === selectedStatCourse)}
+                attendanceData={allRecords.filter(r => r.courseName === selectedStatCourse)}
+                appId={appId}
+                adminEmail={adminUser.email}
+                onReset={handleResetCourse}
+                startDate={startDate}
+                setStartDate={setStartDate}
+             />
+          ) : (
+            <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+              <BarChart3 size={48} className="mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-500">Selecciona un curso arriba para ver el rendimiento académico.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- COMPONENTE PÚBLICO (Solo Lectura) ---
+const PublicReportView = ({ publicData, appId }) => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [startDate, setStartDate] = useState(''); 
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
+      where("courseName", "==", publicData.courseName)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const records = snap.docs.map(d => d.data());
+      setData(records);
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => unsub();
+  }, [publicData, appId]);
+
+  if(loading) return <div className="text-center p-10">Cargando reporte público...</div>;
+
+  return (
+    <div className="max-w-4xl mx-auto py-10">
+      <div className="bg-blue-600 text-white p-8 rounded-t-2xl shadow-lg">
+        <h1 className="text-3xl font-bold mb-2">Reporte de Asistencia Público</h1>
+        <div className="flex gap-6 text-blue-100">
+          <span className="flex items-center gap-2"><BookOpen size={18}/> Curso: {publicData.courseName}</span>
+          <span className="flex items-center gap-2"><User size={18}/> Docente: {publicData.teacherEmail}</span>
+        </div>
+      </div>
+      <div className="bg-white p-6 rounded-b-2xl shadow-lg border-x border-b">
+         <StatsView 
+            course={{name: publicData.courseName}} 
+            attendanceData={data} 
+            appId={appId}
+            adminEmail={publicData.teacherEmail}
+            startDate={startDate}
+            setStartDate={setStartDate}
+         />
+         <p className="text-center text-xs text-gray-400 mt-8 border-t pt-4">
+           Este es un reporte generado automáticamente por AsistenciaQR Pro. 
+         </p>
+      </div>
+    </div>
+  );
+};
+
+// --- (StudentDashboard se mantiene igual con jsQR dinámico) ---
+const StudentDashboard = ({ userData, user, appId }) => {
+  const [scanning, setScanning] = useState(false);
+  const [location, setLocation] = useState(null);
+  const [status, setStatus] = useState('idle');
+  const [msg, setMsg] = useState('');
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+    script.async = true;
+    document.body.appendChild(script);
+    return () => { document.body.removeChild(script); };
   }, []);
 
-  const handleLogin = (userData) => { setUser(userData); setView('dashboard'); };
-  const handleLogout = async () => { await signOut(auth); setUser(null); setView('login'); };
+  const startScan = async () => {
+    setStatus('locating'); setMsg('GPS...');
+    if (!navigator.geolocation) { setStatus('error'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setStatus('scanning'); setScanning(true); },
+      (err) => { setStatus('error'); setMsg('GPS requerido'); }
+    );
+  };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-100 text-[#00A8E8] font-bold animate-pulse">Cargando Sistema...</div>;
+  useEffect(() => { if (scanning) startVideo(); else stopVideo(); return () => stopVideo(); }, [scanning]);
 
-  switch (view) {
-    case 'welcome': return <PublicRegistration onViewChange={setView} isConnected={true} />;
-    case 'login': return <AuthScreen onViewChange={setView} onLogin={handleLogin} />;
-    case 'dashboard': return user && (user.role === 'admin' || user.role === 'auxiliar') ? <Dashboard user={user} onLogout={handleLogout} /> : <AuthScreen onViewChange={setView} onLogin={handleLogin} />;
-    default: return <PublicRegistration onViewChange={setView} isConnected={true} />;
-  }
-}
+  const startVideo = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", true); 
+        videoRef.current.play();
+        animationRef.current = requestAnimationFrame(tick);
+      }
+    } catch (err) { setMsg("Cámara bloqueada. Usa manual."); }
+  };
+  const stopVideo = () => {
+    if (videoRef.current && videoRef.current.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+  };
+  const tick = () => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+      const cvs = canvasRef.current; const vid = videoRef.current;
+      cvs.height = vid.videoHeight; cvs.width = vid.videoWidth;
+      const ctx = cvs.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
+      const img = ctx.getImageData(0, 0, cvs.width, cvs.height);
+      const jsQR = window.jsQR;
+      if (jsQR) {
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+        if (code) { new Audio('https://raw.githubusercontent.com/maykbrito/libs/main/scanner.mp3').play().catch(()=>{}); processAttendance(code.data); return; }
+      }
+    }
+    animationRef.current = requestAnimationFrame(tick);
+  };
+  
+  // CORRECCIÓN DE SEGURIDAD: Evitar duplicados por sesión
+  const processAttendance = async (code) => {
+    // 1. Detener el escáner visualmente mientras verificamos
+    setScanning(false);
+    setStatus('saving'); 
+    setMsg('Verificando asistencia...');
+
+    try {
+      // 2. VERIFICACIÓN DE DUPLICADOS
+      // Consultamos si ya existe un registro con el mismo código de sesión y el mismo Carné de estudiante
+      const qCheck = query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
+        where("sessionCode", "==", code),
+        where("studentCarne", "==", userData.carne) // Mejor validación que usar UID de dispositivo
+      );
+      
+      const existingDocs = await getDocs(qCheck);
+
+      if (!existingDocs.empty) {
+        // Ya existe -> Mostrar error y salir
+        setStatus('error');
+        setMsg('⚠️ Ya registraste asistencia en esta sesión.');
+        return;
+      }
+
+      // 3. Si no existe, procedemos a guardar
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), { 
+        sessionCode: code, 
+        courseName: userData.currentCourse, 
+        studentId: user.uid, 
+        studentName: userData.name, 
+        studentCarne: userData.carne, 
+        studentEmail: userData.email, 
+        timestamp: serverTimestamp(), 
+        location: location || { lat: 0, lng: 0 } 
+      }); 
+      
+      setStatus('success'); 
+      setMsg(`¡Registrado correctamente!`); 
+
+    } catch (e) { 
+      console.error(e);
+      setStatus('error'); 
+      setMsg('Error de conexión.');
+    }
+  };
+  
+  const manual = () => { const c = prompt("Código:"); if(c) processAttendance(c); };
+
+  return (
+    <div className="max-w-xl mx-auto space-y-6"><Card className="p-6">
+       <div className="flex items-center gap-4 mb-6"><div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xl">{userData.name[0]}</div><div><h2 className="text-xl font-bold">{userData.name}</h2><p className="text-gray-500">{userData.carne}</p></div></div>
+       {!scanning && status !== 'success' && <div className="text-center"><p className="mb-4">Clase: <strong>{userData.currentCourse}</strong></p><Button onClick={startScan} className="w-full py-4"><QrCode/> Escanear QR</Button></div>}
+       {scanning && <div className="relative aspect-square bg-black rounded-lg overflow-hidden flex items-center justify-center"><video ref={videoRef} className="absolute w-full h-full object-cover" muted playsInline /><canvas ref={canvasRef} className="hidden"/><div className="border-2 border-blue-500 w-64 h-64 z-10 animate-pulse"></div><div className="absolute bottom-4 flex gap-2 w-full px-4"><Button variant="danger" onClick={()=>{setScanning(false); setStatus('idle')}} className="flex-1">Cancelar</Button><Button variant="secondary" onClick={manual} className="flex-1">Manual</Button></div></div>}
+       {status === 'success' && <div className="text-center py-8"><CheckCircle size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">¡Listo!</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Finalizar</Button></div>}
+       {status === 'error' && <div className="text-center py-8"><AlertTriangle size={48} className="text-yellow-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">Atención</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Volver</Button></div>}
+    </Card></div>
+  );
+};
