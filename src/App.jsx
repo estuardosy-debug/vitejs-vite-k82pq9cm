@@ -23,7 +23,8 @@ import {
   QrCode, User, LogOut, FileSpreadsheet, Users, CheckCircle, 
   AlertCircle, Lock, RefreshCw, BookOpen, Plus, Trash2, 
   UserPlus, Settings, ShieldAlert, Check, X, UserX, 
-  BarChart3, Share2, PieChart as PieChartIcon, ExternalLink
+  BarChart3, Share2, PieChart as PieChartIcon, ExternalLink, Calendar,
+  Eraser, AlertTriangle
 } from 'lucide-react';
 
 // Librería de gráficos
@@ -70,24 +71,39 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
   return <button onClick={onClick} className={`${base} ${vars[variant]} ${className}`} disabled={disabled} title={title}>{Icon && <Icon size={18} />}{children}</button>;
 };
 
+// CORRECCIÓN VISUAL: Forzamos bg-white y text-black para evitar campos oscuros en móviles
 const Input = ({ label, type = "text", value, onChange, placeholder, required = false }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-    <input type={type} value={value} onChange={onChange} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder={placeholder} required={required} />
+    <input 
+      type={type} 
+      value={value} 
+      onChange={onChange} 
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white text-black placeholder-gray-500"
+      placeholder={placeholder} 
+      required={required} 
+      style={{ backgroundColor: '#ffffff', color: '#000000' }} // Estilo en línea para máxima prioridad
+    />
   </div>
 );
 
+// CORRECCIÓN VISUAL: Igual que el input, forzamos estilos
 const Select = ({ label, value, onChange, options, placeholder, required = false }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-    <select value={value} onChange={onChange} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" required={required}>
-      <option value="" disabled>{placeholder}</option>
-      {options.map((opt) => <option key={opt.id} value={opt.name}>{opt.name}</option>)}
+    <select 
+      value={value} 
+      onChange={onChange} 
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none bg-white text-black"
+      required={required}
+      style={{ backgroundColor: '#ffffff', color: '#000000' }}
+    >
+      <option value="" disabled className="text-gray-400">{placeholder}</option>
+      {options.map((opt) => <option key={opt.id} value={opt.name} className="text-black">{opt.name}</option>)}
     </select>
   </div>
 );
 
-// CORRECCIÓN AQUÍ: Se agregó {...props} para permitir el onClick en la tarjeta
 const Card = ({ children, className = "", ...props }) => (
   <div 
     className={`bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden ${className}`}
@@ -106,7 +122,6 @@ export default function App() {
   const [adminUser, setAdminUser] = useState(null); 
   const [publicCourseId, setPublicCourseId] = useState(null);
 
-  // Detectar Modo Público desde URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
@@ -127,7 +142,6 @@ export default function App() {
     const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) {} };
     initAuth();
     return onAuthStateChanged(auth, (u) => {
-      // Solo cambiamos el loading si no estamos en modo publico
       if(!publicCourseId) {
         setUser(u);
         setLoading(false);
@@ -139,7 +153,6 @@ export default function App() {
     setCurrentUserData(null);
     setAdminUser(null);
     setView('landing');
-    // Limpiar URL params
     window.history.pushState({}, '', window.location.pathname);
   };
 
@@ -200,8 +213,6 @@ const LandingScreen = ({ setView }) => (
   </div>
 );
 
-// ... (Login/Register con correcciones menores en estilos para evitar overflow)
-
 const AdminLogin = ({ setView, setAdminUser, appId }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -235,7 +246,10 @@ const AdminRegister = ({ setView, appId }) => {
 };
 const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
     const [c, setC] = useState([]); const [sel, setSel] = useState(''); const [id, setId] = useState('');
-    useEffect(() => { if(user) onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), orderBy('name')), s=>setC(s.docs.map(d=>d.data())))}, [user]);
+    useEffect(() => { 
+        if(user) onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), orderBy('name')), 
+        s=>setC(s.docs.map(d=>({ id: d.id, ...d.data() })))) 
+    }, [user]);
     const log = async (e) => { e.preventDefault(); const s = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("carne", "==", id))); if(!s.empty){ setCurrentUserData({...s.docs[0].data(), currentCourse: sel}); setView('student-dash'); } else alert("No encontrado"); };
     return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Estudiante</h2><form onSubmit={log}><Select label="Curso" value={sel} onChange={e=>setSel(e.target.value)} options={c} placeholder="Elige..." /><Input label="ID" value={id} onChange={e=>setId(e.target.value)} /><Button className="w-full" type="submit">Entrar</Button><div className="mt-4 text-center"><a onClick={()=>setView('student-register')} className="text-blue-600 cursor-pointer">Crear cuenta</a></div></form></Card></div>
 };
@@ -246,14 +260,23 @@ const StudentRegister = ({ setView, user, appId }) => {
 };
 
 // --- COMPONENTE DE ESTADÍSTICAS AVANZADAS ---
-const StatsView = ({ course, attendanceData, appId, adminEmail }) => {
-  // 1. Calcular Sesiones Totales (denominator)
-  const sessions = [...new Set(attendanceData.map(r => r.sessionCode))];
-  const totalClasses = sessions.length || 1; // Evitar division por cero
+const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDate, setStartDate }) => {
+  // 1. Filtrar datos por fecha si existe (Con corrección de zona horaria)
+  const filteredData = startDate ? attendanceData.filter(r => {
+    if (!r.timestamp) return false;
+    const recordDate = r.timestamp.toDate();
+    const year = recordDate.getFullYear();
+    const month = String(recordDate.getMonth() + 1).padStart(2, '0');
+    const day = String(recordDate.getDate()).padStart(2, '0');
+    const recordDateString = `${year}-${month}-${day}`;
+    return recordDateString >= startDate;
+  }) : attendanceData;
 
-  // 2. Agrupar asistencia por estudiante
+  const sessions = [...new Set(filteredData.map(r => r.sessionCode))];
+  const totalClasses = sessions.length || 1; 
+
   const studentStats = {};
-  attendanceData.forEach(r => {
+  filteredData.forEach(r => {
     if (!studentStats[r.studentCarne]) {
       studentStats[r.studentCarne] = { name: r.studentName, count: 0, id: r.studentCarne };
     }
@@ -279,8 +302,20 @@ const StatsView = ({ course, attendanceData, appId, adminEmail }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+      <div className="bg-gray-50 border p-4 rounded-lg flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="text-sm text-gray-600 flex items-center gap-2">
+           <Calendar size={18} />
+           <span>Analizando datos a partir de:</span>
+        </div>
+        <input 
+          type="date" 
+          value={startDate} 
+          onChange={(e) => setStartDate(e.target.value)}
+          className="px-3 py-2 border rounded-md bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+      </div>
+
       <div className="flex flex-col md:flex-row gap-6">
-        {/* Gráfico Pastel */}
         <Card className="flex-1 p-6 flex flex-col items-center">
           <h4 className="font-bold mb-4 text-gray-700">Estado General del Grupo</h4>
           {pieData.length > 0 ? (
@@ -297,10 +332,9 @@ const StatsView = ({ course, attendanceData, appId, adminEmail }) => {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-          ) : <p className="text-gray-400 py-10">Faltan datos</p>}
+          ) : <p className="text-gray-400 py-10">Sin datos en el periodo seleccionado</p>}
         </Card>
 
-        {/* Resumen */}
         <Card className="flex-1 p-6">
           <h4 className="font-bold mb-4 text-gray-700">Métricas Clave</h4>
           <div className="space-y-4">
@@ -319,7 +353,6 @@ const StatsView = ({ course, attendanceData, appId, adminEmail }) => {
         </Card>
       </div>
 
-      {/* Tabla Detallada */}
       <Card className="overflow-hidden">
         <div className="p-4 bg-gray-50 border-b font-bold flex justify-between">
             <span>Detalle por Estudiante</span>
@@ -358,49 +391,60 @@ const StatsView = ({ course, attendanceData, appId, adminEmail }) => {
                   </td>
                 </tr>
               ))}
+              {report.length === 0 && (
+                <tr><td colSpan="4" className="p-4 text-center text-gray-400">No hay asistencias registradas en este periodo.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {onReset && (
+        <div className="border border-red-200 rounded-xl p-6 bg-red-50 mt-8">
+           <h4 className="font-bold text-red-700 mb-2 flex items-center gap-2"><AlertTriangle size={20}/> Zona de Peligro</h4>
+           <p className="text-sm text-red-600 mb-4">
+             Si deseas iniciar un nuevo ciclo escolar o cometiste errores, puedes reiniciar el historial. 
+             Esta acción eliminará <strong>permanentemente</strong> todos los registros de asistencia de este curso.
+           </p>
+           <Button variant="danger" onClick={() => onReset(course.name)} icon={Eraser}>
+             Reiniciar Historial del Curso
+           </Button>
+        </div>
+      )}
+
     </div>
   );
 };
 
-// 5. Admin Dashboard (ACTUALIZADO: Filtro por Creador + Estadísticas)
+// 5. Admin Dashboard
 const AdminDashboard = ({ user, adminUser, appId }) => {
   const [tab, setTab] = useState('session'); // session | stats
   const [sessionCode, setSessionCode] = useState(null);
   const [courses, setCourses] = useState([]);
-  const [allRecords, setAllRecords] = useState([]); // Todos los registros del profesor
+  const [allRecords, setAllRecords] = useState([]); 
   const [newCourseName, setNewCourseName] = useState('');
-  const [selectedStatCourse, setSelectedStatCourse] = useState(''); // Curso seleccionado para stats
+  const [selectedStatCourse, setSelectedStatCourse] = useState(''); 
+  const [startDate, setStartDate] = useState(''); 
 
-  // Cargar CURSOS (Solo los creados por mí)
   useEffect(() => {
     if (!user || !adminUser) return;
     const q = query(
       collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), 
-      where("createdBy", "==", adminUser.email), // 🔒 AISLAMIENTO
+      where("createdBy", "==", adminUser.email), 
       orderBy('name')
     );
-    // Fallback simple:
     const qSimple = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), where("createdBy", "==", adminUser.email));
-    
     return onSnapshot(qSimple, (snap) => {
       setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }, [user, adminUser, appId]);
 
-  // Cargar ASISTENCIA (Filtrada por mis cursos en memoria)
   useEffect(() => {
     if (!user || courses.length === 0) return;
     const myCourseNames = courses.map(c => c.name);
-    
-    // Traemos lo más reciente
     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), orderBy('timestamp', 'desc'));
     return onSnapshot(q, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data(), dateStr: d.data().timestamp?.toDate().toLocaleString() }));
-      // Filtramos solo los registros que pertenecen a mis cursos
       const myRecords = data.filter(r => myCourseNames.includes(r.courseName));
       setAllRecords(myRecords);
     });
@@ -411,10 +455,25 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
     if(newCourseName.trim()) { 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), { 
         name: newCourseName.trim(), 
-        createdBy: adminUser.email, // 🔒 PROPIEDAD DEL CURSO
+        createdBy: adminUser.email, 
         createdAt: serverTimestamp() 
       }); 
       setNewCourseName(''); 
+    }
+  };
+
+  const handleResetCourse = async (courseName) => {
+    if(confirm(`⚠️ ¿ATENCIÓN DOCENTE!\n\nEstás a punto de ELIMINAR PERMANENTEMENTE todo el historial de asistencia del curso: "${courseName}".\n\nEsta acción NO se puede deshacer.\n¿Estás seguro de continuar?`)) {
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), where("courseName", "==", courseName));
+      try {
+        const snapshot = await getDocs(q);
+        const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+        alert(`Historial del curso "${courseName}" eliminado correctamente.`);
+      } catch (error) {
+        console.error("Error borrando:", error);
+        alert("Hubo un error al intentar borrar los datos.");
+      }
     }
   };
 
@@ -422,7 +481,6 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
 
   return (
     <div className="space-y-6">
-      {/* Header Dashboard */}
       <div className="bg-white border p-4 rounded-xl flex justify-between items-center shadow-sm">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Panel de Control</h2>
@@ -486,7 +544,6 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
           </Card>
         </div>
       ) : (
-        // VISTA DE ESTADÍSTICAS
         <div className="space-y-6">
           <div className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
             <label className="font-bold text-gray-700">Analizar Curso:</label>
@@ -506,6 +563,9 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
                 attendanceData={allRecords.filter(r => r.courseName === selectedStatCourse)}
                 appId={appId}
                 adminEmail={adminUser.email}
+                onReset={handleResetCourse}
+                startDate={startDate}
+                setStartDate={setStartDate}
              />
           ) : (
             <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
@@ -523,16 +583,13 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
 const PublicReportView = ({ publicData, appId }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [startDate, setStartDate] = useState(''); 
 
   useEffect(() => {
-    // Buscar asistencia para este curso y profesor específico
-    // Validamos que el curso pertenezca al profesor indirectamente filtrando por nombre de curso
-    // En una app real, usaríamos IDs. Aquí usamos nombres.
     const q = query(
       collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
       where("courseName", "==", publicData.courseName)
     );
-
     const unsub = onSnapshot(q, (snap) => {
       const records = snap.docs.map(d => d.data());
       setData(records);
@@ -558,6 +615,8 @@ const PublicReportView = ({ publicData, appId }) => {
             attendanceData={data} 
             appId={appId}
             adminEmail={publicData.teacherEmail}
+            startDate={startDate}
+            setStartDate={setStartDate}
          />
          <p className="text-center text-xs text-gray-400 mt-8 border-t pt-4">
            Este es un reporte generado automáticamente por AsistenciaQR Pro. 
@@ -626,11 +685,54 @@ const StudentDashboard = ({ userData, user, appId }) => {
     }
     animationRef.current = requestAnimationFrame(tick);
   };
+  
+  // CORRECCIÓN DE SEGURIDAD: Evitar duplicados por sesión
   const processAttendance = async (code) => {
-    setScanning(false); setStatus('saving');
-    try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), { sessionCode: code, courseName: userData.currentCourse, studentId: user.uid, studentName: userData.name, studentCarne: userData.carne, studentEmail: userData.email, timestamp: serverTimestamp(), location: location || { lat: 0, lng: 0 } }); setStatus('success'); setMsg(`¡Registrado!`); } 
-    catch (e) { setStatus('error'); }
+    // 1. Detener el escáner visualmente mientras verificamos
+    setScanning(false);
+    setStatus('saving'); 
+    setMsg('Verificando asistencia...');
+
+    try {
+      // 2. VERIFICACIÓN DE DUPLICADOS
+      // Consultamos si ya existe un registro con el mismo código de sesión y el mismo ID de estudiante
+      const qCheck = query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
+        where("sessionCode", "==", code),
+        where("studentId", "==", user.uid)
+      );
+      
+      const existingDocs = await getDocs(qCheck);
+
+      if (!existingDocs.empty) {
+        // Ya existe -> Mostrar error y salir
+        setStatus('error');
+        setMsg('⚠️ Ya registraste asistencia en esta sesión.');
+        return;
+      }
+
+      // 3. Si no existe, procedemos a guardar
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), { 
+        sessionCode: code, 
+        courseName: userData.currentCourse, 
+        studentId: user.uid, 
+        studentName: userData.name, 
+        studentCarne: userData.carne, 
+        studentEmail: userData.email, 
+        timestamp: serverTimestamp(), 
+        location: location || { lat: 0, lng: 0 } 
+      }); 
+      
+      setStatus('success'); 
+      setMsg(`¡Registrado correctamente!`); 
+
+    } catch (e) { 
+      console.error(e);
+      setStatus('error'); 
+      setMsg('Error de conexión.');
+    }
   };
+  
   const manual = () => { const c = prompt("Código:"); if(c) processAttendance(c); };
 
   return (
@@ -638,7 +740,8 @@ const StudentDashboard = ({ userData, user, appId }) => {
        <div className="flex items-center gap-4 mb-6"><div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xl">{userData.name[0]}</div><div><h2 className="text-xl font-bold">{userData.name}</h2><p className="text-gray-500">{userData.carne}</p></div></div>
        {!scanning && status !== 'success' && <div className="text-center"><p className="mb-4">Clase: <strong>{userData.currentCourse}</strong></p><Button onClick={startScan} className="w-full py-4"><QrCode/> Escanear QR</Button></div>}
        {scanning && <div className="relative aspect-square bg-black rounded-lg overflow-hidden flex items-center justify-center"><video ref={videoRef} className="absolute w-full h-full object-cover" muted playsInline /><canvas ref={canvasRef} className="hidden"/><div className="border-2 border-blue-500 w-64 h-64 z-10 animate-pulse"></div><div className="absolute bottom-4 flex gap-2 w-full px-4"><Button variant="danger" onClick={()=>{setScanning(false); setStatus('idle')}} className="flex-1">Cancelar</Button><Button variant="secondary" onClick={manual} className="flex-1">Manual</Button></div></div>}
-       {status === 'success' && <div className="text-center py-8"><CheckCircle size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">¡Listo!</h3><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Otro</Button></div>}
+       {status === 'success' && <div className="text-center py-8"><CheckCircle size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">¡Listo!</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Finalizar</Button></div>}
+       {status === 'error' && <div className="text-center py-8"><AlertTriangle size={48} className="text-yellow-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">Atención</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Volver</Button></div>}
     </Card></div>
   );
 };
