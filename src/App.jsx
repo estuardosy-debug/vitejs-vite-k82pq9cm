@@ -416,7 +416,7 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
   );
 };
 
-// 5. Admin Dashboard
+// 5. Admin Dashboard (CORREGIDO: SE RESTAURÓ SUPER ADMIN)
 const AdminDashboard = ({ user, adminUser, appId }) => {
   const [tab, setTab] = useState('session'); // session | stats
   const [sessionCode, setSessionCode] = useState(null);
@@ -425,6 +425,28 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
   const [newCourseName, setNewCourseName] = useState('');
   const [selectedStatCourse, setSelectedStatCourse] = useState(''); 
   const [startDate, setStartDate] = useState(''); 
+
+  // Estados para Super Admin
+  const [pendingTeachers, setPendingTeachers] = useState([]);
+  const [approvedTeachers, setApprovedTeachers] = useState([]);
+
+  // Efectos para Super Admin
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), where("status", "==", "pending")), (snap) => setPendingTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => unsub();
+  }, [user, adminUser, appId]);
+
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), where("status", "==", "approved")), 
+    (snap) => setApprovedTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.id !== adminUser.id)));
+    return () => unsub();
+  }, [user, adminUser, appId]);
+
+  // Handlers Super Admin
+  const handleApprove = async (id) => await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id), { status: 'approved' });
+  const handleReject = async (id) => { if(confirm('¿Rechazar?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id)); };
 
   useEffect(() => {
     if (!user || !adminUser) return;
@@ -493,56 +515,86 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
       </div>
 
       {tab === 'session' ? (
-        <div className="grid md:grid-cols-3 gap-6">
-          <Card className="md:col-span-1 p-6 h-[450px] flex flex-col">
-            <h3 className="font-bold mb-4 flex items-center gap-2"><BookOpen size={18}/> Mis Cursos</h3>
-            <form onSubmit={handleAddCourse} className="flex gap-2 mb-4">
-              <input value={newCourseName} onChange={e=>setNewCourseName(e.target.value)} className="flex-1 border rounded px-3 text-sm" placeholder="Nuevo curso..." />
-              <button className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700"><Plus size={16}/></button>
-            </form>
-            <div className="flex-1 overflow-auto space-y-2">
-              {courses.length === 0 && <p className="text-gray-400 text-center text-sm mt-10">Crea tu primer curso</p>}
-              {courses.map(c => (
-                <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded group">
-                  <span className="font-medium text-sm">{c.name}</span>
-                  <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_courses', c.id))} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
+        <>
+          {/* PANEL SUPER ADMIN RESTAURADO */}
+          {adminUser?.role === 'superadmin' && (
+            <div className="space-y-4 mb-6">
+              {pendingTeachers.length > 0 && (
+                <Card className="p-6 bg-orange-50 border-l-4 border-orange-500">
+                  <h3 className="font-bold text-orange-800 mb-2">Solicitudes Pendientes</h3>
+                  {pendingTeachers.map(t => (
+                    <div key={t.id} className="flex justify-between items-center bg-white p-3 rounded mb-2 shadow-sm">
+                      <div><p className="font-bold">{t.name}</p><p className="text-xs">{t.email}</p></div>
+                      <div className="flex gap-2"><button onClick={() => handleApprove(t.id)} className="bg-green-100 text-green-700 px-2 py-1 rounded text-sm">Aprobar</button><button onClick={() => handleReject(t.id)} className="bg-red-100 text-red-700 px-2 py-1 rounded text-sm">Rechazar</button></div>
+                    </div>
+                  ))}
+                </Card>
+              )}
+              <Card className="p-6">
+                <h3 className="font-bold mb-2">Docentes Activos</h3>
+                <div className="grid md:grid-cols-2 gap-2">
+                  {approvedTeachers.map(t => (
+                    <div key={t.id} className="flex justify-between p-2 border rounded hover:bg-gray-50">
+                      <div><p className="font-medium">{t.name}</p><p className="text-xs text-gray-500">{t.email}</p></div>
+                      <button onClick={() => handleReject(t.id)} className="text-red-400 hover:text-red-600"><UserX size={18} /></button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </Card>
             </div>
-          </Card>
+          )}
 
-          <Card className="md:col-span-1 p-6 flex flex-col items-center justify-center text-center">
-             {sessionCode ? (
-               <div className="animate-in zoom-in">
-                 <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${sessionCode}`} className="mb-4 mix-blend-multiply" />
-                 <p className="font-mono text-xl font-bold tracking-widest mb-4">{sessionCode}</p>
-                 <Button variant="danger" onClick={()=>setSessionCode(null)} className="w-full">Terminar Clase</Button>
-               </div>
-             ) : (
-               <div className="text-center">
-                 <QrCode size={64} className="text-gray-200 mx-auto mb-4" />
-                 <p className="text-gray-500 mb-6">Genera un código QR para que<br/>tus alumnos fichen asistencia.</p>
-                 <Button onClick={generateNewSession} className="w-full">Generar QR Nuevo</Button>
-               </div>
-             )}
-          </Card>
+          <div className="grid md:grid-cols-3 gap-6">
+            <Card className="md:col-span-1 p-6 h-[450px] flex flex-col">
+              <h3 className="font-bold mb-4 flex items-center gap-2"><BookOpen size={18}/> Mis Cursos</h3>
+              <form onSubmit={handleAddCourse} className="flex gap-2 mb-4">
+                <input value={newCourseName} onChange={e=>setNewCourseName(e.target.value)} className="flex-1 border rounded px-3 text-sm" placeholder="Nuevo curso..." />
+                <button className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700"><Plus size={16}/></button>
+              </form>
+              <div className="flex-1 overflow-auto space-y-2">
+                {courses.length === 0 && <p className="text-gray-400 text-center text-sm mt-10">Crea tu primer curso</p>}
+                {courses.map(c => (
+                  <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded group">
+                    <span className="font-medium text-sm">{c.name}</span>
+                    <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_courses', c.id))} className="text-gray-300 hover:text-red-500"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+              </div>
+            </Card>
 
-          <Card className="md:col-span-1 p-6 h-[450px] overflow-hidden flex flex-col">
-             <h3 className="font-bold mb-4 flex items-center gap-2"><RefreshCw size={18}/> Actividad Reciente</h3>
-             <div className="flex-1 overflow-auto space-y-3">
-               {allRecords.slice(0, 20).map(r => (
-                 <div key={r.id} className="border-l-4 border-blue-500 pl-3 py-1">
-                   <p className="font-bold text-sm text-gray-800">{r.studentName}</p>
-                   <div className="flex justify-between text-xs text-gray-500">
-                     <span>{r.courseName}</span>
-                     <span>{r.dateStr.split(',')[1]}</span>
-                   </div>
-                 </div>
-               ))}
-               {allRecords.length === 0 && <p className="text-center text-gray-400 mt-10">Sin actividad hoy</p>}
-             </div>
-          </Card>
-        </div>
+            <Card className="md:col-span-1 p-6 flex flex-col items-center justify-center text-center">
+              {sessionCode ? (
+                <div className="animate-in zoom-in">
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${sessionCode}`} className="mb-4 mix-blend-multiply" />
+                  <p className="font-mono text-xl font-bold tracking-widest mb-4">{sessionCode}</p>
+                  <Button variant="danger" onClick={()=>setSessionCode(null)} className="w-full">Terminar Clase</Button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <QrCode size={64} className="text-gray-200 mx-auto mb-4" />
+                  <p className="text-gray-500 mb-6">Genera un código QR para que<br/>tus alumnos fichen asistencia.</p>
+                  <Button onClick={generateNewSession} className="w-full">Generar QR Nuevo</Button>
+                </div>
+              )}
+            </Card>
+
+            <Card className="md:col-span-1 p-6 h-[450px] overflow-hidden flex flex-col">
+              <h3 className="font-bold mb-4 flex items-center gap-2"><RefreshCw size={18}/> Actividad Reciente</h3>
+              <div className="flex-1 overflow-auto space-y-3">
+                {allRecords.slice(0, 20).map(r => (
+                  <div key={r.id} className="border-l-4 border-blue-500 pl-3 py-1">
+                    <p className="font-bold text-sm text-gray-800">{r.studentName}</p>
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>{r.courseName}</span>
+                      <span>{r.dateStr.split(',')[1]}</span>
+                    </div>
+                  </div>
+                ))}
+                {allRecords.length === 0 && <p className="text-center text-gray-400 mt-10">Sin actividad hoy</p>}
+              </div>
+            </Card>
+          </div>
+        </>
       ) : (
         <div className="space-y-6">
           <div className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
@@ -695,7 +747,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
 
     try {
       // 2. VERIFICACIÓN DE DUPLICADOS
-      // Consultamos si ya existe un registro con el mismo código de sesión y el mismo Carné de estudiante
+      // Consultamos si ya existe un registro con el mismo código de sesión y el mismo ID de estudiante
       const qCheck = query(
         collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
         where("sessionCode", "==", code),
