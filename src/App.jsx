@@ -24,7 +24,7 @@ import {
   AlertCircle, Lock, RefreshCw, BookOpen, Plus, Trash2, 
   UserPlus, Settings, ShieldAlert, Check, X, UserX, 
   BarChart3, Share2, PieChart as PieChartIcon, ExternalLink, Calendar,
-  Eraser, AlertTriangle, Download, FileText
+  Eraser, AlertTriangle, Download, FileText, Smartphone, MapPin
 } from 'lucide-react';
 
 // Librería de gráficos
@@ -71,7 +71,6 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
   return <button onClick={onClick} className={`${base} ${vars[variant]} ${className}`} disabled={disabled} title={title}>{Icon && <Icon size={18} />}{children}</button>;
 };
 
-// CORRECCIÓN VISUAL: Forzamos bg-white y text-black para evitar campos oscuros en móviles
 const Input = ({ label, type = "text", value, onChange, placeholder, required = false }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
@@ -82,12 +81,11 @@ const Input = ({ label, type = "text", value, onChange, placeholder, required = 
       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white text-black placeholder-gray-500"
       placeholder={placeholder} 
       required={required} 
-      style={{ backgroundColor: '#ffffff', color: '#000000' }} // Estilo en línea para máxima prioridad
+      style={{ backgroundColor: '#ffffff', color: '#000000' }} 
     />
   </div>
 );
 
-// CORRECCIÓN VISUAL: Igual que el input, forzamos estilos
 const Select = ({ label, value, onChange, options, placeholder, required = false }) => (
   <div className="mb-4">
     <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
@@ -244,25 +242,54 @@ const AdminRegister = ({ setView, appId }) => {
     };
     return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Registro</h2><form onSubmit={reg}><Input label="Nombre" value={f.name} onChange={e=>setF({...f, name:e.target.value})} /><Input label="Email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} /><Input label="Password" type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} /><Input label="Código (Opcional)" value={f.secretCode} onChange={e=>setF({...f, secretCode:e.target.value})} /><Button className="w-full" type="submit">Registrar</Button></form></Card></div>
 };
+
+// LOGIN ESTUDIANTE CON VERIFICACIÓN DE DISPOSITIVO (SEGURIDAD REFORZADA)
 const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
     const [c, setC] = useState([]); const [sel, setSel] = useState(''); const [id, setId] = useState('');
+    
     useEffect(() => { 
         if(user) onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_courses'), orderBy('name')), 
         s=>setC(s.docs.map(d=>({ id: d.id, ...d.data() })))) 
     }, [user]);
-    const log = async (e) => { e.preventDefault(); const s = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("carne", "==", id))); if(!s.empty){ setCurrentUserData({...s.docs[0].data(), currentCourse: sel}); setView('student-dash'); } else alert("No encontrado"); };
+
+    const log = async (e) => { 
+      e.preventDefault(); 
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("carne", "==", id));
+      const s = await getDocs(q); 
+      
+      if(!s.empty){ 
+        const userData = s.docs[0].data();
+        
+        // 🔒 VERIFICACIÓN DE DISPOSITIVO
+        if (userData.deviceId && userData.deviceId !== user.uid) {
+           alert("⛔ ACCESO DENEGADO\n\nEste carné está vinculado a otro dispositivo móvil.\nPor seguridad, solo puedes registrar asistencia desde tu teléfono personal.");
+           return;
+        }
+
+        setCurrentUserData({...userData, currentCourse: sel}); 
+        setView('student-dash'); 
+      } else {
+        alert("ID no encontrado"); 
+      }
+    };
+    
     return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Estudiante</h2><form onSubmit={log}><Select label="Curso" value={sel} onChange={e=>setSel(e.target.value)} options={c} placeholder="Elige..." /><Input label="ID" value={id} onChange={e=>setId(e.target.value)} /><Button className="w-full" type="submit">Entrar</Button><div className="mt-4 text-center"><a onClick={()=>setView('student-register')} className="text-blue-600 cursor-pointer">Crear cuenta</a></div></form></Card></div>
 };
+
 const StudentRegister = ({ setView, user, appId }) => {
     const [f, setF] = useState({name:'', carne:'', email:''});
-    const reg = async (e) => { e.preventDefault(); await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), {...f, deviceId: user.uid}); alert("Listo"); setView('student-login'); };
-    return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Registro Estudiante</h2><form onSubmit={reg}><Input label="Nombre" value={f.name} onChange={e=>setF({...f, name:e.target.value})} /><Input label="ID" value={f.carne} onChange={e=>setF({...f, carne:e.target.value})} /><Input label="Email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} /><Button className="w-full" type="submit">Registrar</Button></form></Card></div>
+    const reg = async (e) => { 
+      e.preventDefault(); 
+      // Guardamos deviceId como user.uid para vincular permanentemente
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), {...f, deviceId: user.uid}); 
+      alert("✅ Cuenta Creada\n\nEste dispositivo ha quedado vinculado a tu carné."); 
+      setView('student-login'); 
+    };
+    return <div className="max-w-md mx-auto py-10"><Card className="p-8"><h2 className="text-2xl text-center mb-4">Registro Estudiante</h2><div className="bg-yellow-50 p-3 rounded mb-4 text-sm text-yellow-800 flex gap-2"><Smartphone size={16} className="shrink-0 mt-1"/><span>Tu cuenta quedará vinculada a este teléfono. No podrás usar otro.</span></div><form onSubmit={reg}><Input label="Nombre" value={f.name} onChange={e=>setF({...f, name:e.target.value})} /><Input label="ID" value={f.carne} onChange={e=>setF({...f, carne:e.target.value})} /><Input label="Email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} /><Button className="w-full" type="submit">Registrar</Button></form></Card></div>
 };
 
 // --- COMPONENTE DE ESTADÍSTICAS AVANZADAS ---
 const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDate, setStartDate }) => {
-  // 1. Filtrar datos por fecha si existe (Con lógica robusta de fecha local)
-  // Utilizamos useMemo para que el filtrado se recalcule inmediatamente cuando cambie startDate
   const filteredData = React.useMemo(() => {
     if (!startDate) return attendanceData;
 
@@ -277,12 +304,13 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
     });
   }, [attendanceData, startDate]);
 
-  // 2. Calcular Sesiones Totales ESTRICTAMENTE basadas en la data filtrada
-  // Esto asegura que si filtramos "hoy", solo cuente las sesiones de "hoy"
+  // 2. Calcular Sesiones Totales
   const sessions = React.useMemo(() => {
     const uniqueSessions = new Set();
     filteredData.forEach(r => {
-      if (r.sessionCode) uniqueSessions.add(r.sessionCode);
+      if (r.sessionCode && r.sessionCode !== "null" && r.sessionCode !== "undefined") {
+        uniqueSessions.add(r.sessionCode);
+      }
     });
     return [...uniqueSessions];
   }, [filteredData]);
@@ -341,23 +369,31 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
   };
 
   const downloadHistoryCSV = () => {
-      const headers = ["Fecha", "Hora", "Curso", "Estudiante", "Carnet", "Codigo Sesion"];
+      // Agregado: Columnas para verificar ubicación
+      const headers = ["Fecha", "Hora", "Curso", "Estudiante", "Carnet", "Codigo Sesion", "Latitud", "Longitud", "Mapa Link"];
       const rows = filteredData.map(r => {
           const dateObj = r.timestamp ? r.timestamp.toDate() : new Date();
+          const lat = r.location?.lat || "0";
+          const lng = r.location?.lng || "0";
+          const mapLink = r.location ? `https://www.google.com/maps?q=${lat},${lng}` : "Sin datos";
+          
           return [
               dateObj.toLocaleDateString(),
               dateObj.toLocaleTimeString(),
               `"${r.courseName}"`,
               `"${r.studentName}"`,
               `"${r.studentCarne}"`,
-              `"${r.sessionCode}"`
+              `"${r.sessionCode}"`,
+              lat,
+              lng,
+              mapLink
           ];
       });
       const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `historial_asistencia_${course.name}.csv`);
+      link.setAttribute("download", `historial_ubicacion_${course.name}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -414,7 +450,7 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
                 <Button variant="secondary" onClick={downloadSummaryCSV} title="Descargar lista de alumnos y sus promedios">
                     <Users size={16}/> Consolidado
                 </Button>
-                <Button variant="secondary" onClick={downloadHistoryCSV} title="Descargar historial completo registro por registro">
+                <Button variant="secondary" onClick={downloadHistoryCSV} title="Descargar historial completo con ubicación">
                     <FileText size={16}/> Historial
                 </Button>
             </div>
@@ -425,6 +461,7 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
         </Card>
       </div>
 
+      {/* Tabla Resumen */}
       <Card className="overflow-hidden">
         <div className="p-4 bg-gray-50 border-b font-bold flex justify-between">
             <span>Detalle por Estudiante</span>
@@ -466,6 +503,54 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
               {report.length === 0 && (
                 <tr><td colSpan="4" className="p-4 text-center text-gray-400">No hay asistencias registradas en este periodo.</td></tr>
               )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Nueva Tabla: Bitácora de Registros con Mapa */}
+      <Card className="overflow-hidden mt-6">
+        <div className="p-4 bg-blue-50 border-b font-bold flex justify-between items-center">
+            <span className="text-blue-800">Bitácora de Registros (Detalle de Ubicación)</span>
+            <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded">Más recientes</span>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-white text-gray-500 border-b sticky top-0">
+              <tr>
+                <th className="p-3">Fecha/Hora</th>
+                <th className="p-3">Estudiante</th>
+                <th className="p-3 text-center">Ubicación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredData.sort((a,b) => b.timestamp - a.timestamp).map((r, i) => (
+                <tr key={i} className="border-b hover:bg-gray-50">
+                  <td className="p-3 text-xs">
+                    <div className="font-bold">{r.timestamp?.toDate().toLocaleDateString()}</div>
+                    <div className="text-gray-500">{r.timestamp?.toDate().toLocaleTimeString()}</div>
+                  </td>
+                  <td className="p-3">
+                     <div className="font-medium">{r.studentName}</div>
+                     <div className="text-xs text-gray-400">{r.studentCarne}</div>
+                  </td>
+                  <td className="p-3 text-center">
+                    {r.location?.lat ? (
+                      <a 
+                        href={`https://www.google.com/maps?q=${r.location.lat},${r.location.lng}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition-colors"
+                        title="Ver ubicación en mapa"
+                      >
+                        <MapPin size={14} /> Ver Mapa
+                      </a>
+                    ) : (
+                      <span className="text-gray-400 text-xs">Sin GPS</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -700,172 +785,5 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
         </div>
       )}
     </div>
-  );
-};
-
-// --- COMPONENTE PÚBLICO (Solo Lectura) ---
-const PublicReportView = ({ publicData, appId }) => {
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [startDate, setStartDate] = useState(''); 
-
-  useEffect(() => {
-    const q = query(
-      collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
-      where("courseName", "==", publicData.courseName)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const records = snap.docs.map(d => d.data());
-      setData(records);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [publicData, appId]);
-
-  if(loading) return <div className="text-center p-10">Cargando reporte público...</div>;
-
-  return (
-    <div className="max-w-4xl mx-auto py-10">
-      <div className="bg-blue-600 text-white p-8 rounded-t-2xl shadow-lg">
-        <h1 className="text-3xl font-bold mb-2">Reporte de Asistencia Público</h1>
-        <div className="flex gap-6 text-blue-100">
-          <span className="flex items-center gap-2"><BookOpen size={18}/> Curso: {publicData.courseName}</span>
-          <span className="flex items-center gap-2"><User size={18}/> Docente: {publicData.teacherEmail}</span>
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-b-2xl shadow-lg border-x border-b">
-         <StatsView 
-            course={{name: publicData.courseName}} 
-            attendanceData={data} 
-            appId={appId}
-            adminEmail={publicData.teacherEmail}
-            startDate={startDate}
-            setStartDate={setStartDate}
-         />
-         <p className="text-center text-xs text-gray-400 mt-8 border-t pt-4">
-           Este es un reporte generado automáticamente por AsistenciaQR Pro. 
-         </p>
-      </div>
-    </div>
-  );
-};
-
-// --- (StudentDashboard se mantiene igual con jsQR dinámico) ---
-const StudentDashboard = ({ userData, user, appId }) => {
-  const [scanning, setScanning] = useState(false);
-  const [location, setLocation] = useState(null);
-  const [status, setStatus] = useState('idle');
-  const [msg, setMsg] = useState('');
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const animationRef = useRef(null);
-
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-    script.async = true;
-    document.body.appendChild(script);
-    return () => { document.body.removeChild(script); };
-  }, []);
-
-  const startScan = async () => {
-    setStatus('locating'); setMsg('GPS...');
-    if (!navigator.geolocation) { setStatus('error'); return; }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setStatus('scanning'); setScanning(true); },
-      (err) => { setStatus('error'); setMsg('GPS requerido'); }
-    );
-  };
-
-  useEffect(() => { if (scanning) startVideo(); else stopVideo(); return () => stopVideo(); }, [scanning]);
-
-  const startVideo = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", true); 
-        videoRef.current.play();
-        animationRef.current = requestAnimationFrame(tick);
-      }
-    } catch (err) { setMsg("Cámara bloqueada. Usa manual."); }
-  };
-  const stopVideo = () => {
-    if (videoRef.current && videoRef.current.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-    if (animationRef.current) cancelAnimationFrame(animationRef.current);
-  };
-  const tick = () => {
-    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-      const cvs = canvasRef.current; const vid = videoRef.current;
-      cvs.height = vid.videoHeight; cvs.width = vid.videoWidth;
-      const ctx = cvs.getContext("2d", { willReadFrequently: true });
-      ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
-      const img = ctx.getImageData(0, 0, cvs.width, cvs.height);
-      const jsQR = window.jsQR;
-      if (jsQR) {
-        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-        if (code) { new Audio('https://raw.githubusercontent.com/maykbrito/libs/main/scanner.mp3').play().catch(()=>{}); processAttendance(code.data); return; }
-      }
-    }
-    animationRef.current = requestAnimationFrame(tick);
-  };
-  
-  // CORRECCIÓN DE SEGURIDAD: Evitar duplicados por sesión
-  const processAttendance = async (code) => {
-    // 1. Detener el escáner visualmente mientras verificamos
-    setScanning(false);
-    setStatus('saving'); 
-    setMsg('Verificando asistencia...');
-
-    try {
-      // 2. VERIFICACIÓN DE DUPLICADOS
-      // Consultamos si ya existe un registro con el mismo código de sesión y el mismo ID de estudiante
-      const qCheck = query(
-        collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'),
-        where("sessionCode", "==", code),
-        where("studentCarne", "==", userData.carne) // Mejor validación que usar UID de dispositivo
-      );
-      
-      const existingDocs = await getDocs(qCheck);
-
-      if (!existingDocs.empty) {
-        // Ya existe -> Mostrar error y salir
-        setStatus('error');
-        setMsg('⚠️ Ya registraste asistencia en esta sesión.');
-        return;
-      }
-
-      // 3. Si no existe, procedemos a guardar
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), { 
-        sessionCode: code, 
-        courseName: userData.currentCourse, 
-        studentId: user.uid, 
-        studentName: userData.name, 
-        studentCarne: userData.carne, 
-        studentEmail: userData.email, 
-        timestamp: serverTimestamp(), 
-        location: location || { lat: 0, lng: 0 } 
-      }); 
-      
-      setStatus('success'); 
-      setMsg(`¡Registrado correctamente!`); 
-
-    } catch (e) { 
-      console.error(e);
-      setStatus('error'); 
-      setMsg('Error de conexión.');
-    }
-  };
-  
-  const manual = () => { const c = prompt("Código:"); if(c) processAttendance(c); };
-
-  return (
-    <div className="max-w-xl mx-auto space-y-6"><Card className="p-6">
-       <div className="flex items-center gap-4 mb-6"><div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xl">{userData.name[0]}</div><div><h2 className="text-xl font-bold">{userData.name}</h2><p className="text-gray-500">{userData.carne}</p></div></div>
-       {!scanning && status !== 'success' && <div className="text-center"><p className="mb-4">Clase: <strong>{userData.currentCourse}</strong></p><Button onClick={startScan} className="w-full py-4"><QrCode/> Escanear QR</Button></div>}
-       {scanning && <div className="relative aspect-square bg-black rounded-lg overflow-hidden flex items-center justify-center"><video ref={videoRef} className="absolute w-full h-full object-cover" muted playsInline /><canvas ref={canvasRef} className="hidden"/><div className="border-2 border-blue-500 w-64 h-64 z-10 animate-pulse"></div><div className="absolute bottom-4 flex gap-2 w-full px-4"><Button variant="danger" onClick={()=>{setScanning(false); setStatus('idle')}} className="flex-1">Cancelar</Button><Button variant="secondary" onClick={manual} className="flex-1">Manual</Button></div></div>}
-       {status === 'success' && <div className="text-center py-8"><CheckCircle size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">¡Listo!</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Finalizar</Button></div>}
-       {status === 'error' && <div className="text-center py-8"><AlertTriangle size={48} className="text-yellow-500 mx-auto mb-4"/><h3 className="text-2xl font-bold">Atención</h3><p className="text-gray-600 mb-4">{msg}</p><Button variant="secondary" onClick={()=>setStatus('idle')} className="mt-4">Volver</Button></div>}
-    </Card></div>
   );
 };
