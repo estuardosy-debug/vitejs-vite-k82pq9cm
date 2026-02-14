@@ -261,38 +261,53 @@ const StudentRegister = ({ setView, user, appId }) => {
 
 // --- COMPONENTE DE ESTADÍSTICAS AVANZADAS ---
 const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDate, setStartDate }) => {
-  // 1. Filtrar datos por fecha si existe (Con corrección de zona horaria)
-  const filteredData = startDate ? attendanceData.filter(r => {
-    if (!r.timestamp) return false;
-    const recordDate = r.timestamp.toDate();
-    const year = recordDate.getFullYear();
-    const month = String(recordDate.getMonth() + 1).padStart(2, '0');
-    const day = String(recordDate.getDate()).padStart(2, '0');
-    const recordDateString = `${year}-${month}-${day}`;
-    return recordDateString >= startDate;
-  }) : attendanceData;
+  // 1. Filtrar datos por fecha si existe (Con lógica robusta de fecha local)
+  // Utilizamos useMemo para que el filtrado se recalcule inmediatamente cuando cambie startDate
+  const filteredData = React.useMemo(() => {
+    if (!startDate) return attendanceData;
 
-  // 2. Calcular Sesiones Totales (CORREGIDO: Basado en data filtrada)
-  const sessions = [...new Set(filteredData.map(r => r.sessionCode))];
-  // Si no hay sesiones filtradas, es 0. Evitamos división por cero en el cálculo.
+    return attendanceData.filter(r => {
+      if (!r.timestamp) return false;
+      const recordDate = r.timestamp.toDate();
+      const year = recordDate.getFullYear();
+      const month = String(recordDate.getMonth() + 1).padStart(2, '0');
+      const day = String(recordDate.getDate()).padStart(2, '0');
+      const recordDateString = `${year}-${month}-${day}`;
+      return recordDateString >= startDate;
+    });
+  }, [attendanceData, startDate]);
+
+  // 2. Calcular Sesiones Totales ESTRICTAMENTE basadas en la data filtrada
+  // Esto asegura que si filtramos "hoy", solo cuente las sesiones de "hoy"
+  const sessions = React.useMemo(() => {
+    const uniqueSessions = new Set();
+    filteredData.forEach(r => {
+      if (r.sessionCode) uniqueSessions.add(r.sessionCode);
+    });
+    return [...uniqueSessions];
+  }, [filteredData]);
+  
   const totalClasses = sessions.length; 
 
-  const studentStats = {};
-  filteredData.forEach(r => {
-    if (!studentStats[r.studentCarne]) {
-      studentStats[r.studentCarne] = { name: r.studentName, count: 0, id: r.studentCarne };
-    }
-    studentStats[r.studentCarne].count += 1;
-  });
+  // 3. Generar reporte
+  const report = React.useMemo(() => {
+    const studentStats = {};
+    filteredData.forEach(r => {
+      if (!studentStats[r.studentCarne]) {
+        studentStats[r.studentCarne] = { name: r.studentName, count: 0, id: r.studentCarne };
+      }
+      studentStats[r.studentCarne].count += 1;
+    });
 
-  const report = Object.values(studentStats).map(s => {
-    const percentage = totalClasses === 0 ? 0 : Math.round((s.count / totalClasses) * 100);
-    return {
-        ...s,
-        percentage,
-        status: percentage >= 80 ? 'Aprobado' : 'Riesgo'
-    };
-  });
+    return Object.values(studentStats).map(s => {
+      const percentage = totalClasses === 0 ? 0 : Math.round((s.count / totalClasses) * 100);
+      return {
+          ...s,
+          percentage,
+          status: percentage >= 80 ? 'Aprobado' : 'Riesgo'
+      };
+    });
+  }, [filteredData, totalClasses]);
 
   const pieData = [
     { name: 'Aprobado (>80%)', value: report.filter(r => r.percentage >= 80).length, color: '#22c55e' },
@@ -387,7 +402,7 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
           <h4 className="font-bold mb-4 text-gray-700">Métricas Clave</h4>
           <div className="space-y-4">
             <div className="flex justify-between p-3 bg-blue-50 rounded">
-              <span>Clases Impartidas (Periodo):</span>
+              <span>Clases Impartidas {startDate && '(Filtrado)'}:</span>
               <span className="font-bold text-blue-700">{totalClasses}</span>
             </div>
             <div className="flex justify-between p-3 bg-gray-50 rounded">
