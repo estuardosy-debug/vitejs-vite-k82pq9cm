@@ -24,7 +24,7 @@ import {
   AlertCircle, Lock, RefreshCw, BookOpen, Plus, Trash2, 
   UserPlus, Settings, ShieldAlert, Check, X, UserX, 
   BarChart3, Share2, PieChart as PieChartIcon, ExternalLink, Calendar,
-  Eraser, AlertTriangle
+  Eraser, AlertTriangle, Download, FileText
 } from 'lucide-react';
 
 // Librería de gráficos
@@ -272,8 +272,10 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
     return recordDateString >= startDate;
   }) : attendanceData;
 
+  // 2. Calcular Sesiones Totales (CORREGIDO: Basado en data filtrada)
   const sessions = [...new Set(filteredData.map(r => r.sessionCode))];
-  const totalClasses = sessions.length || 1; 
+  // Si no hay sesiones filtradas, es 0. Evitamos división por cero en el cálculo.
+  const totalClasses = sessions.length; 
 
   const studentStats = {};
   filteredData.forEach(r => {
@@ -283,11 +285,14 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
     studentStats[r.studentCarne].count += 1;
   });
 
-  const report = Object.values(studentStats).map(s => ({
-    ...s,
-    percentage: Math.round((s.count / totalClasses) * 100),
-    status: (s.count / totalClasses) >= 0.8 ? 'Aprobado' : 'Riesgo'
-  }));
+  const report = Object.values(studentStats).map(s => {
+    const percentage = totalClasses === 0 ? 0 : Math.round((s.count / totalClasses) * 100);
+    return {
+        ...s,
+        percentage,
+        status: percentage >= 80 ? 'Aprobado' : 'Riesgo'
+    };
+  });
 
   const pieData = [
     { name: 'Aprobado (>80%)', value: report.filter(r => r.percentage >= 80).length, color: '#22c55e' },
@@ -297,7 +302,50 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
   const generatePublicLink = () => {
     const url = `${window.location.origin}${window.location.pathname}?mode=public&course=${encodeURIComponent(course.name)}&teacher=${encodeURIComponent(adminEmail)}`;
     navigator.clipboard.writeText(url);
-    alert("🔗 Enlace público copiado al portapapeles.\n\nCualquier persona con este enlace podrá ver este reporte.");
+    alert("🔗 Enlace público copiado al portapapeles.");
+  };
+
+  const downloadSummaryCSV = () => {
+    const headers = ["Nombre", "Carnet", "Asistencias", "Total Clases", "Porcentaje", "Estado"];
+    const rows = report.map(r => [
+        `"${r.name}"`, 
+        `"${r.id}"`, 
+        r.count, 
+        totalClasses, 
+        `${r.percentage}%`, 
+        r.status
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `consolidado_${course.name}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const downloadHistoryCSV = () => {
+      const headers = ["Fecha", "Hora", "Curso", "Estudiante", "Carnet", "Codigo Sesion"];
+      const rows = filteredData.map(r => {
+          const dateObj = r.timestamp ? r.timestamp.toDate() : new Date();
+          return [
+              dateObj.toLocaleDateString(),
+              dateObj.toLocaleTimeString(),
+              `"${r.courseName}"`,
+              `"${r.studentName}"`,
+              `"${r.studentCarne}"`,
+              `"${r.sessionCode}"`
+          ];
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `historial_asistencia_${course.name}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
 
   return (
@@ -339,14 +387,23 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
           <h4 className="font-bold mb-4 text-gray-700">Métricas Clave</h4>
           <div className="space-y-4">
             <div className="flex justify-between p-3 bg-blue-50 rounded">
-              <span>Clases Impartidas:</span>
+              <span>Clases Impartidas (Periodo):</span>
               <span className="font-bold text-blue-700">{totalClasses}</span>
             </div>
             <div className="flex justify-between p-3 bg-gray-50 rounded">
-              <span>Total Alumnos:</span>
+              <span>Alumnos (Periodo):</span>
               <span className="font-bold">{report.length}</span>
             </div>
-            <Button variant="outline" onClick={generatePublicLink} className="w-full mt-4" icon={Share2}>
+            
+            <div className="grid grid-cols-2 gap-2 mt-4">
+                <Button variant="secondary" onClick={downloadSummaryCSV} title="Descargar lista de alumnos y sus promedios">
+                    <Users size={16}/> Consolidado
+                </Button>
+                <Button variant="secondary" onClick={downloadHistoryCSV} title="Descargar historial completo registro por registro">
+                    <FileText size={16}/> Historial
+                </Button>
+            </div>
+            <Button variant="outline" onClick={generatePublicLink} className="w-full" icon={Share2}>
               Compartir Reporte Público
             </Button>
           </div>
