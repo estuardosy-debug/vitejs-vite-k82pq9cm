@@ -131,7 +131,6 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => { 
-        // Si el usuario no tiene sesión de Google, iniciamos anónimo por defecto
         if (!auth.currentUser) {
             try { await signInAnonymously(auth); } catch (e) {} 
         }
@@ -299,7 +298,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
         s=>setC(s.docs.map(d=>({ id: d.id, ...d.data() })))) 
     }, [user]);
 
-    // LOGIN GOOGLE ESTUDIANTE
     const handleGoogleLogin = async () => {
         if (!sel) return alert("Por favor, selecciona tu curso primero.");
         const provider = new GoogleAuthProvider();
@@ -307,7 +305,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
             const result = await signInWithPopup(auth, provider);
             const gUser = result.user;
             
-            // Buscar por UID de Google (soluciona el problema de cambiar de dispositivo)
             const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("deviceId", "==", gUser.uid));
             const s = await getDocs(q);
             
@@ -315,7 +312,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
                 setCurrentUserData({...s.docs[0].data(), currentCourse: sel}); 
                 setView('student-dash');
             } else {
-                // Si no existe, lo mandamos a registrar pre-llenando datos
                 alert("Cuenta de Google nueva. Completa tu registro agregando tu carné.");
                 setCurrentUserData({ googleUid: gUser.uid, tempName: gUser.displayName, tempEmail: gUser.email });
                 setView('student-register');
@@ -326,7 +322,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
         }
     };
 
-    // LOGIN MANUAL ESTUDIANTE
     const handleManualLogin = async (e) => { 
       e.preventDefault(); 
       if (!sel) return alert("Selecciona un curso.");
@@ -336,8 +331,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
       if(!s.empty){ 
         const userData = s.docs[0].data();
         
-        // Verificación Estricta: Si la cuenta está ligada a un Google UID, el login manual genérico falla.
-        // Si no está ligada a Google, verificamos el deviceId del navegador temporal.
         if (userData.deviceId && userData.deviceId !== user.uid) {
            alert("⛔ ACCESO DENEGADO\n\nEste carné está vinculado a otra cuenta o dispositivo.\nSi lo registraste con Google, usa el botón 'Ingresar con Google'.");
            return;
@@ -376,7 +369,6 @@ const StudentLogin = ({ setView, setCurrentUserData, user, appId }) => {
 };
 
 const StudentRegister = ({ setView, user, appId, setCurrentUserData }) => {
-    // Si viene de Google Login, pre-llenamos
     const isGoogle = user && auth.currentUser && auth.currentUser.providerData.some(p => p.providerId === 'google.com');
     const [f, setF] = useState({
         name: auth.currentUser?.displayName || '', 
@@ -386,10 +378,8 @@ const StudentRegister = ({ setView, user, appId, setCurrentUserData }) => {
 
     const reg = async (e) => { 
       e.preventDefault(); 
-      // Si usó Google, su deviceId es el UID seguro de Google. Si no, es el anónimo temporal.
       const secureId = auth.currentUser ? auth.currentUser.uid : user.uid;
       
-      // Validar si el carnet ya existe para evitar duplicados en la BD
       const qCheck = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), where("carne", "==", f.carne));
       const s = await getDocs(qCheck);
       if(!s.empty) {
@@ -428,7 +418,7 @@ const StudentRegister = ({ setView, user, appId, setCurrentUserData }) => {
     );
 };
 
-// --- COMPONENTE DE ESTADÍSTICAS AVANZADAS (CORREGIDO PANTALLA NEGRA) ---
+// --- COMPONENTE DE ESTADÍSTICAS AVANZADAS ---
 const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDate, setStartDate }) => {
   const filteredData = React.useMemo(() => {
     if (!startDate) return attendanceData;
@@ -443,7 +433,6 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
     });
   }, [attendanceData, startDate]);
 
-  // CORRECCIÓN MATEMÁTICA: Evita contar "basura" o códigos vacíos que inflan el total de clases
   const sessions = React.useMemo(() => {
     const uniqueSessions = new Set();
     filteredData.forEach(r => {
@@ -466,7 +455,6 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
     });
 
     return Object.values(studentStats).map(s => {
-      // CORRECCIÓN PANTALLA NEGRA: Protegemos contra división por cero estricta
       const percentage = totalClasses > 0 ? Math.round((s.count / totalClasses) * 100) : 0;
       return {
           ...s,
@@ -610,7 +598,7 @@ const StatsView = ({ course, attendanceData, appId, adminEmail, onReset, startDa
   );
 };
 
-// 5. Admin Dashboard (NUEVO TAB: GESTIÓN DE DATOS)
+// 5. Admin Dashboard 
 const AdminDashboard = ({ user, adminUser, appId }) => {
   const [tab, setTab] = useState('session'); // session | stats | manage
   const [sessionCode, setSessionCode] = useState(null);
@@ -619,7 +607,40 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
   const [newCourseName, setNewCourseName] = useState('');
   const [selectedStatCourse, setSelectedStatCourse] = useState(''); 
   const [startDate, setStartDate] = useState(''); 
-  const [allStudents, setAllStudents] = useState([]); // Para Gestión de Datos
+  const [allStudents, setAllStudents] = useState([]); 
+
+  // MANTENER LA SESIÓN ACTIVA EN PANTALLA
+  useEffect(() => {
+    if (!user || !adminUser) return;
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_sessions'), where("createdBy", "==", adminUser.email), where("active", "==", true));
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        setSessionCode(snap.docs[0].data().code);
+      } else {
+        setSessionCode(null);
+      }
+    });
+    return () => unsub();
+  }, [user, adminUser, appId]);
+
+  const [pendingTeachers, setPendingTeachers] = useState([]);
+  const [approvedTeachers, setApprovedTeachers] = useState([]);
+
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), where("status", "==", "pending")), (snap) => setPendingTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => unsub();
+  }, [user, adminUser, appId]);
+
+  useEffect(() => {
+    if (!user || adminUser?.role !== 'superadmin') return;
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_admins'), where("status", "==", "approved")), 
+    (snap) => setApprovedTeachers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.id !== adminUser.id)));
+    return () => unsub();
+  }, [user, adminUser, appId]);
+
+  const handleApprove = async (id) => await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id), { status: 'approved' });
+  const handleReject = async (id) => { if(confirm('¿Rechazar?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'qr_admins', id)); };
 
   useEffect(() => {
     if (!user || !adminUser) return;
@@ -637,13 +658,10 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
     });
   }, [user, courses, appId]);
 
-  // Cargar todos los estudiantes registrados para la pestaña de Gestión
   useEffect(() => {
       if(!user) return;
       const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_users'), orderBy('name'));
-      return onSnapshot(q, (snap) => {
-          setAllStudents(snap.docs.map(d => ({ docId: d.id, ...d.data() })));
-      });
+      return onSnapshot(q, (snap) => setAllStudents(snap.docs.map(d => ({ docId: d.id, ...d.data() }))));
   }, [user, appId]);
 
   const handleAddCourse = async (e) => { 
@@ -666,7 +684,6 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
     }
   };
 
-  // NUEVAS FUNCIONES DE GESTIÓN (Borrar Sesión Específica y Borrar Estudiante Falso)
   const handleDeleteSession = async (sessionCodeDelete) => {
       if(confirm(`¿Borrar la sesión completa con el código: ${sessionCodeDelete}?`)){
           const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), where("sessionCode", "==", sessionCodeDelete));
@@ -684,13 +701,35 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
       }
   };
 
-  const generateNewSession = () => {
+  // NUEVA GENERACIÓN Y CONTROL DE SESIÓN EN SERVIDOR
+  const generateNewSession = async () => {
       try {
-          setSessionCode(`SESION-${Date.now().toString().slice(-4)}`);
+          // Desactivar sesiones anteriores del profe por si quedó alguna "abierta"
+          const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_sessions'), where("createdBy", "==", adminUser.email), where("active", "==", true));
+          const snap = await getDocs(q);
+          const updates = snap.docs.map(d => updateDoc(d.ref, { active: false }));
+          await Promise.all(updates);
+
+          // Crear código impredecible de 5 dígitos
+          const newCode = `SESION-${Math.floor(10000 + Math.random() * 90000)}`;
+          
+          // Guardar en servidor
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_sessions'), {
+              code: newCode, active: true, createdBy: adminUser.email, timestamp: serverTimestamp()
+          });
       } catch (error) { console.error("Error generando QR", error); }
   };
 
-  // Obtener sesiones únicas para la vista de Gestión
+  const endActiveSession = async () => {
+      if (!sessionCode) return;
+      try {
+          const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_sessions'), where("code", "==", sessionCode));
+          const snap = await getDocs(q);
+          const updates = snap.docs.map(d => updateDoc(d.ref, { active: false }));
+          await Promise.all(updates);
+      } catch (error) { console.error("Error al terminar clase", error); }
+  };
+
   const uniqueSessionsForManage = [...new Set(allRecords.map(r => r.sessionCode))].filter(Boolean);
 
   return (
@@ -726,15 +765,16 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
           <Card className="md:col-span-1 p-6 flex flex-col items-center justify-center text-center">
             {sessionCode ? (
               <div className="animate-in zoom-in">
-                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${sessionCode}`} className="mb-4 mix-blend-multiply" />
+                <div className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full mb-3 inline-block">Sesión Activa</div>
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${sessionCode}`} className="mb-4 mix-blend-multiply mx-auto" />
                 <p className="font-mono text-xl font-bold tracking-widest mb-4">{sessionCode}</p>
-                <Button variant="danger" onClick={()=>setSessionCode(null)} className="w-full">Terminar Clase</Button>
+                <Button variant="danger" onClick={endActiveSession} className="w-full">Terminar Clase (Cerrar Sesión)</Button>
               </div>
             ) : (
               <div className="text-center">
                 <QrCode size={64} className="text-gray-200 mx-auto mb-4" />
-                <p className="text-gray-500 mb-6">Genera un código QR para que<br/>tus alumnos fichen asistencia.</p>
-                <Button onClick={generateNewSession} className="w-full">Generar QR Nuevo</Button>
+                <p className="text-gray-500 mb-6">Genera un código QR y abre la sesión para que tus alumnos fichen asistencia.</p>
+                <Button onClick={generateNewSession} className="w-full">Iniciar Nueva Clase</Button>
               </div>
             )}
           </Card>
@@ -764,12 +804,7 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
             </select>
           </div>
           {selectedStatCourse ? (
-             <StatsView 
-                course={courses.find(c => c.name === selectedStatCourse)}
-                attendanceData={allRecords.filter(r => r.courseName === selectedStatCourse)}
-                appId={appId} adminEmail={adminUser.email} onReset={handleResetCourse}
-                startDate={startDate} setStartDate={setStartDate}
-             />
+             <StatsView course={courses.find(c => c.name === selectedStatCourse)} attendanceData={allRecords.filter(r => r.courseName === selectedStatCourse)} appId={appId} adminEmail={adminUser.email} onReset={handleResetCourse} startDate={startDate} setStartDate={setStartDate} />
           ) : (
             <div className="text-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
               <BarChart3 size={48} className="mx-auto text-gray-300 mb-4" />
@@ -779,12 +814,9 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
         </div>
       )}
 
-      {/* NUEVA PESTAÑA: GESTIÓN Y LIMPIEZA DE DATOS */}
       {tab === 'manage' && (
           <div className="space-y-6 animate-in fade-in">
              <div className="grid md:grid-cols-2 gap-6">
-                
-                {/* Columna: Borrar Sesiones Falsas */}
                 <Card className="p-6">
                     <h3 className="font-bold text-red-600 mb-2 flex items-center gap-2"><Eraser size={20}/> Limpiar Sesiones de Prueba</h3>
                     <p className="text-sm text-gray-500 mb-4">Elimina sesiones específicas creadas por error o para pruebas. Afecta todos tus cursos.</p>
@@ -799,7 +831,6 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
                     </div>
                 </Card>
 
-                {/* Columna: Borrar Usuarios Falsos */}
                 <Card className="p-6">
                     <h3 className="font-bold text-red-600 mb-2 flex items-center gap-2"><UserX size={20}/> Eliminar Usuarios de Prueba</h3>
                     <p className="text-sm text-gray-500 mb-4">Borra cuentas de estudiantes que se hayan registrado para probar el sistema.</p>
@@ -807,10 +838,7 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
                          {allStudents.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No hay alumnos registrados.</p>}
                          {allStudents.map(student => (
                             <div key={student.docId} className="flex justify-between items-center bg-gray-50 p-3 rounded border border-gray-100">
-                                <div>
-                                    <p className="font-bold text-sm">{student.name}</p>
-                                    <p className="text-xs text-gray-500">Carné: {student.carne}</p>
-                                </div>
+                                <div><p className="font-bold text-sm">{student.name}</p><p className="text-xs text-gray-500">Carné: {student.carne}</p></div>
                                 <button onClick={() => handleDeleteStudent(student.docId, student.name)} className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded transition-colors" title="Eliminar estudiante"><Trash2 size={16}/></button>
                             </div>
                          ))}
@@ -823,7 +851,7 @@ const AdminDashboard = ({ user, adminUser, appId }) => {
   );
 };
 
-// --- COMPONENTE PÚBLICO (Solo Lectura) ---
+// --- COMPONENTE PÚBLICO ---
 const PublicReportView = ({ publicData, appId }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -840,10 +868,7 @@ const PublicReportView = ({ publicData, appId }) => {
     <div className="max-w-4xl mx-auto py-10">
       <div className="bg-blue-600 text-white p-8 rounded-t-2xl shadow-lg">
         <h1 className="text-3xl font-bold mb-2">Reporte de Asistencia Público</h1>
-        <div className="flex gap-6 text-blue-100">
-          <span className="flex items-center gap-2"><BookOpen size={18}/> Curso: {publicData.courseName}</span>
-          <span className="flex items-center gap-2"><User size={18}/> Docente: {publicData.teacherEmail}</span>
-        </div>
+        <div className="flex gap-6 text-blue-100"><span className="flex items-center gap-2"><BookOpen size={18}/> Curso: {publicData.courseName}</span><span className="flex items-center gap-2"><User size={18}/> Docente: {publicData.teacherEmail}</span></div>
       </div>
       <div className="bg-white p-6 rounded-b-2xl shadow-lg border-x border-b">
          <StatsView course={{name: publicData.courseName}} attendanceData={data} appId={appId} adminEmail={publicData.teacherEmail} startDate={startDate} setStartDate={setStartDate} />
@@ -913,10 +938,20 @@ const StudentDashboard = ({ userData, user, appId }) => {
   };
   
   const processAttendance = async (code) => {
-    setScanning(false); setStatus('saving'); setMsg('Verificando asistencia...');
+    setScanning(false); setStatus('saving'); setMsg('Validando sesión en el servidor...');
 
     try {
-      // Validamos si ya se registró en ESTE MISMO CÓDIGO DE SESIÓN
+      // 1. VALIDACIÓN ESTRICTA DE SESIÓN (NUEVO BLINDAJE ANTIFRAUDE)
+      const qSession = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_sessions'), where("code", "==", code), where("active", "==", true));
+      const sessionDocs = await getDocs(qSession);
+
+      if (sessionDocs.empty) {
+        setStatus('error'); setMsg('⚠️ Código inválido o la clase ya ha terminado.'); return;
+      }
+
+      setMsg('Verificando registros previos...');
+
+      // 2. VALIDACIÓN DE DUPLICADOS
       const qCheck = query(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), where("sessionCode", "==", code), where("studentCarne", "==", userData.carne));
       const existingDocs = await getDocs(qCheck);
 
@@ -924,6 +959,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
         setStatus('error'); setMsg('⚠️ Ya registraste asistencia en esta sesión de clase.'); return;
       }
 
+      // 3. GUARDADO EXITOSO
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'qr_attendance'), { 
         sessionCode: code, courseName: userData.currentCourse, studentId: user.uid, studentName: userData.name, 
         studentCarne: userData.carne, studentEmail: userData.email, timestamp: serverTimestamp(), location: location || { lat: 0, lng: 0 } 
@@ -933,7 +969,7 @@ const StudentDashboard = ({ userData, user, appId }) => {
     } catch (e) { console.error(e); setStatus('error'); setMsg('Error de conexión.'); }
   };
   
-  const manual = () => { const c = prompt("Ingresa el código que te dio el docente:"); if(c) processAttendance(c); };
+  const manual = () => { const c = prompt("Ingresa el código que te dio el docente (Ej. SESION-12345):"); if(c) processAttendance(c); };
 
   return (
     <div className="max-w-xl mx-auto space-y-6"><Card className="p-6">
